@@ -4,25 +4,27 @@
  * - Loads the built Chrome extension (packages/chrome/dist) into Playwright's Chromium.
  * - Maps www.youtube.com and player.vimeo.com to a local HTTPS server (self-signed cert), so the
  *   statically declared content scripts run exactly as they would on the real sites – including
- *   the cross-origin iframe case (Laracasts embeds Vimeo).
+ *   the cross-origin iframe case (Vimeo embeds) and web-component players (Mux on Laracasts).
  * - Runs the real VS Code-side hub (HubNode) in this process; "typing" is simulated by calling
  *   node.activity('edit'), which is what the VS Code extension does on a document change.
  */
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as https from 'node:https';
-import * as net from 'node:net';
+import type * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { chromium, type BrowserContext, type Frame, type Page, type Worker } from 'playwright';
-import { CHROME_EXTENSION_ID, type HubStatus } from '@codealong/protocol';
+import { DEV_CHROME_EXTENSION_ID, type HubStatus } from '@codealong/protocol';
 import { DEFAULT_SETTINGS } from '../packages/vscode/src/core/hubCore';
 import { HubNode } from '../packages/vscode/src/hub/hubNode';
 import { loadOrCreateEditorToken } from '../packages/vscode/src/hub/token';
 
 const ROOT = path.resolve(__dirname, '..');
-const EXTENSION_DIR = path.join(ROOT, 'packages/chrome/dist');
+// A separate build with test-only ports, so a real CodeAlong running on this machine is never touched.
+const EXTENSION_DIR = path.join(ROOT, 'e2e/.artifacts/chrome');
+const TEST_PORTS = [48390, 48391];
 const IDLE_MS = 800;
 
 let tmp: string;
@@ -60,36 +62,46 @@ const PAGES: Record<string, string> = {
   '/watch': `<!doctype html><title>Laravel From Scratch – Episode 1</title>
     <video id="main" src="/media.wav" style="width:960px;height:540px;display:block"></video>
     <video id="decoy" src="/media.wav" muted loop style="width:120px;height:68px"></video>`,
-  // Laracasts-style lesson page: the video lives in a cross-origin Vimeo iframe.
+  // Lesson page with the video in a cross-origin Vimeo iframe.
   '/lesson': `<!doctype html><title>Lesson with embedded player</title>
     <h1>Lesson</h1>
     <iframe id="player" src="https://player.vimeo.com/video/42" style="width:960px;height:540px" allow="autoplay"></iframe>`,
+  // Laracasts-style web-component player (Mux): <mux-player> -> shadow -> <mux-video> -> shadow -> <video>.
+  '/mux': `<!doctype html><title>Mux lesson</title>
+    <mux-player id="player" style="display:block;width:960px;height:540px"></mux-player>
+    <script>
+      customElements.define('mux-video', class extends HTMLElement {
+        constructor() {
+          super();
+          this.attachShadow({ mode: 'open' }).innerHTML =
+            '<video id="main" src="/media.wav" style="width:960px;height:540px;display:block"></video>';
+        }
+      });
+      customElements.define('mux-player', class extends HTMLElement {
+        constructor() {
+          super();
+          this.attachShadow({ mode: 'open' }).innerHTML = '<mux-video></mux-video>';
+        }
+        get media() { return this.shadowRoot.querySelector('mux-video').shadowRoot.querySelector('video'); }
+      });
+    </script>`,
   '/video/42': `<!doctype html><title>player</title>
     <video id="main" src="/media.wav" style="width:100%;height:520px;display:block"></video>`,
 };
-
-async function freePort(): Promise<number> {
-  return new Promise((resolve) => {
-    const s = net.createServer().listen(0, '127.0.0.1', () => {
-      const port = (s.address() as net.AddressInfo).port;
-      s.close(() => resolve(port));
-    });
-  });
-}
 
 async function waitFor<T>(fn: () => T | Promise<T>, what: string, ms = 8_000): Promise<NonNullable<T>> {
   const start = Date.now();
   for (;;) {
     const v = await fn();
     if (v) return v as NonNullable<T>;
-    if (Date.now() - start > ms) throw new Error(`timed out waiting for: ${what}`);
+    if (Date.now() - start > ms) throw new Error(`timed out waiting for: ${what} (hub: ${JSON.stringify(hubStatus)})`);
     await new Promise((r) => setTimeout(r, 50));
   }
 }
 
 async function extensionPage(): Promise<Page> {
   const page = await context.newPage();
-  await page.goto(`chrome-extension://${CHROME_EXTENSION_ID}/popup.html`);
+  await page.goto(`chrome-extension://${DEV_CHROME_EXTENSION_ID}/popup.html`);
   return page;
 }
 
@@ -124,10 +136,27 @@ beforeAll(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codealong-e2e-'));
   const key = path.join(tmp, 'key.pem');
   const cert = path.join(tmp, 'cert.pem');
-  execFileSync('openssl', [
-    'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '1',
-    '-subj', '/CN=codealong-e2e', '-addext', 'subjectAltName=DNS:www.youtube.com,DNS:player.vimeo.com',
-  ], { stdio: 'ignore' });
+  execFileSync(
+    'openssl',
+    [
+      'req',
+      '-x509',
+      '-newkey',
+      'rsa:2048',
+      '-nodes',
+      '-keyout',
+      key,
+      '-out',
+      cert,
+      '-days',
+      '1',
+      '-subj',
+      '/CN=codealong-e2e',
+      '-addext',
+      'subjectAltName=DNS:www.youtube.com,DNS:player.vimeo.com',
+    ],
+    { stdio: 'ignore' },
+  );
 
   const wav = silentWav(60);
   server = https.createServer({ key: fs.readFileSync(key), cert: fs.readFileSync(cert) }, (req, res) => {
@@ -156,12 +185,20 @@ beforeAll(async () => {
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   httpsPort = (server.address() as net.AddressInfo).port;
 
-  hubPort = await freePort();
+  execFileSync(
+    process.execPath,
+    [path.join(ROOT, 'scripts/build.mjs'), '--chrome-only', '--chrome-out=e2e/.artifacts/chrome'],
+    {
+      env: { ...process.env, CODEALONG_HUB_PORTS: TEST_PORTS.join(',') },
+      stdio: 'ignore',
+    },
+  );
+  hubPort = TEST_PORTS[0]!;
   node = new HubNode(
     {
-      port: hubPort,
+      ports: TEST_PORTS,
       editorToken: loadOrCreateEditorToken(path.join(tmp, 'token')),
-      allowedOrigins: () => [`chrome-extension://${CHROME_EXTENSION_ID}`],
+      allowedOrigins: () => [`chrome-extension://${DEV_CHROME_EXTENSION_ID}`],
       settings: () => ({ ...DEFAULT_SETTINGS, idleDelayMs: IDLE_MS }),
     },
     {
@@ -186,9 +223,16 @@ beforeAll(async () => {
       '--autoplay-policy=no-user-gesture-required',
     ],
   });
+  if (process.env.E2E_DEBUG) {
+    context.on('weberror', (e) => console.log('PAGE ERROR', e.error().message));
+    context.on('console', (m) => {
+      if (m.type() === 'error' || m.text().includes('CodeAlong'))
+        console.log('CONSOLE', m.type(), m.text().slice(0, 300));
+    });
+  }
   const worker: Worker = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'));
-  expect(worker.url()).toContain(CHROME_EXTENSION_ID); // the pinned key gives the expected ID
-  expect(await sendToWorker<{ ok: boolean }>({ type: 'popup:setPort', port: hubPort })).toEqual({ ok: true });
+  expect(worker.url()).toContain(DEV_CHROME_EXTENSION_ID); // the pinned key gives the expected ID
+  if (process.env.E2E_DEBUG) await sendToWorker({ type: 'popup:setDebug', debug: true });
 }, 60_000);
 
 afterAll(async () => {
@@ -201,6 +245,15 @@ afterAll(async () => {
 describe('Chrome extension (real Chromium)', () => {
   let page: Page;
 
+  it('opens the welcome page on first install, and it finds VS Code', async () => {
+    const welcome = await waitFor(() => context.pages().find((p) => p.url().endsWith('/welcome.html')), 'welcome tab');
+    await waitFor(
+      async () => (await welcome.textContent('#vscode-status'))?.includes('VS Code is running'),
+      'VS Code found',
+    );
+    await welcome.close();
+  });
+
   it('follows a YouTube-like tab and connects to the hub', async () => {
     page = await context.newPage();
     await page.goto('https://www.youtube.com/watch');
@@ -212,6 +265,12 @@ describe('Chrome extension (real Chromium)', () => {
     expect(result).toEqual({ ok: true });
     await waitFor(() => hubStatus?.phase === 'playing', 'hub sees the tutorial playing');
     expect(hubStatus?.tutorialTitle).toBe('Laravel From Scratch – Episode 1');
+
+    // The popup explains the state in plain words.
+    const popup = await extensionPage();
+    await waitFor(async () => (await popup.textContent('#headline')) === 'Tutorial Playing', 'popup headline');
+    expect(await popup.textContent('#vscode')).toBe('Connected');
+    await popup.close();
   });
 
   it('pauses when the user types and resumes after idle with a ~2 s rewind', async () => {
@@ -291,7 +350,7 @@ describe('Chrome extension (real Chromium)', () => {
     expect(outcome).not.toBe('open');
   });
 
-  it('controls a video inside a cross-origin iframe (Laracasts/Vimeo style)', async () => {
+  it('controls a video inside a cross-origin iframe (Vimeo embed)', async () => {
     const lesson = await context.newPage();
     await lesson.goto('https://www.youtube.com/lesson');
     const frame = await waitFor(() => lesson.frames().find((f) => f.url().includes('player.vimeo.com')), 'iframe');
@@ -300,7 +359,10 @@ describe('Chrome extension (real Chromium)', () => {
 
     const tabId = await tabIdFor('https://www.youtube.com/lesson');
     expect(await sendToWorker({ type: 'popup:follow', tabId })).toEqual({ ok: true });
-    await waitFor(() => hubStatus?.phase === 'playing' && hubStatus.tutorialTitle === 'Lesson with embedded player', 'hub follows lesson');
+    await waitFor(
+      () => hubStatus?.phase === 'playing' && hubStatus.tutorialTitle === 'Lesson with embedded player',
+      'hub follows lesson',
+    );
 
     node.activity('edit');
     await waitFor(async () => (await videoState(frame)).paused, 'iframe video paused');
@@ -310,6 +372,39 @@ describe('Chrome extension (real Chromium)', () => {
     await lesson.close();
     // Without a tutorial the browser has nothing to do and disconnects.
     await waitFor(() => hubStatus?.phase === 'waitingForBrowser', 'closing the tutorial tab clears it');
+  });
+
+  it('finds and controls a video inside nested shadow roots (Laracasts / Mux Player)', async () => {
+    const mux = await context.newPage();
+    await mux.goto('https://www.youtube.com/mux');
+    const muxState = () =>
+      mux.evaluate(() => {
+        const v = (document.getElementById('player') as HTMLElement & { media: HTMLVideoElement }).media;
+        return { paused: v.paused, time: v.currentTime };
+      });
+    await mux.evaluate(() => {
+      const v = (document.getElementById('player') as HTMLElement & { media: HTMLVideoElement }).media;
+      v.currentTime = 10;
+      return v.play();
+    });
+    const tabId = await tabIdFor('https://www.youtube.com/mux');
+    expect(await sendToWorker({ type: 'popup:follow', tabId })).toEqual({ ok: true });
+    await waitFor(
+      () => hubStatus?.phase === 'playing' && hubStatus.tutorialTitle === 'Mux lesson',
+      'hub sees the shadow-DOM video',
+    );
+
+    node.activity('edit');
+    const paused = await waitFor(async () => {
+      const st = await muxState();
+      return st.paused ? st : null;
+    }, 'shadow-DOM video paused');
+    const resumed = await waitFor(async () => {
+      const st = await muxState();
+      return st.paused ? null : st;
+    }, 'shadow-DOM video resumed');
+    expect(resumed.time).toBeLessThan(paused.time - 1.5);
+    await mux.close();
   });
 
   it('recovers when Chrome stops the service worker while the video is paused (MV3 lifecycle)', async () => {

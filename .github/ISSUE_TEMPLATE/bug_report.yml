@@ -1,0 +1,35 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Security problems: please use [private reporting](https://github.com/sebastianingebrigtsen/codealong/security/advisories/new) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: site
+    attributes:
+      label: Video site
+      description: The tutorial site (e.g. youtube.com). A public example link helps a lot.
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: CodeAlong (Chrome and VS Code), Chrome, VS Code, operating system
+      placeholder: CodeAlong 0.1.0 / Chrome 140 / VS Code 1.105 / macOS 15
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Optional. In VS Code enable `codealong.debugLogging` and copy the *CodeAlong* output channel; in Chrome open the popup → Troubleshooting → Show event log. Logs never contain your code.
+      render: text

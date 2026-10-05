@@ -1,6 +1,7 @@
 import type { VideoCause, VideoState } from '@codealong/protocol';
 import type { AgentReply, AgentVideoReport, ToAgent } from '../shared/messages';
 import { chooseCandidate, type Candidate } from '../shared/selection';
+import { findVideos } from './discovery';
 import { VideoController } from './videoController';
 
 /**
@@ -107,7 +108,9 @@ export class FrameAgent {
 
   private scan(initial: boolean): void {
     if (!this.active) return;
-    const videos = Array.from(document.querySelectorAll('video'));
+    // Includes videos inside open shadow roots (web-component players such as Mux on Laracasts).
+    // Their media events do not reach the document listener, so this periodic scan also binds them.
+    const videos = findVideos(document);
     const candidates: Candidate<HTMLVideoElement>[] = videos
       .filter((v) => v.isConnected)
       .map((v) => ({ key: v, area: visibleArea(v), playing: !v.paused && !v.ended }));

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Welcome to CodeAlong</title>
+    <link rel="stylesheet" href="ui.css" />
+  </head>
+  <body class="welcome">
+    <main>
+      <img src="icons/128.png" width="56" height="56" alt="" />
+      <h1>CodeAlong</h1>
+      <p class="tagline">Coding tutorials that wait for you.</p>
+
+      <h2>1. Connect VS Code</h2>
+      <p>
+        CodeAlong has two halves. This Chrome extension pauses and plays the video; the VS Code extension notices when
+        you are coding. They talk only to each other, on this computer.
+      </p>
+      <p class="status-pill" aria-live="polite">
+        <span id="vscode-icon" aria-hidden="true">…</span>
+        <span id="vscode-status">Looking for VS Code…</span>
+      </p>
+      <p id="vscode-help" hidden>
+        Install <a id="vscode-link" href="#" target="_blank" rel="noopener">CodeAlong for VS Code</a>
+        and keep VS Code open. This page updates by itself.
+      </p>
+
+      <h2>2. Follow a tutorial</h2>
+      <ol class="steps">
+        <li>Pin CodeAlong: click the puzzle-piece icon in Chrome's toolbar, then the pin next to CodeAlong.</li>
+        <li>Open a coding tutorial (YouTube, Laracasts, Vimeo or any site with a regular video player).</li>
+        <li>Click the CodeAlong icon and choose <strong>Follow this tab</strong>. Only that tab is ever controlled.</li>
+      </ol>
+
+      <h2>3. Just code</h2>
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">When you…</th>
+            <th scope="col">CodeAlong…</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>start typing in VS Code while the video plays</td>
+            <td>pauses the video</td>
+          </tr>
+          <tr>
+            <td>stop typing for 5 seconds</td>
+            <td>rewinds 2 seconds and continues</td>
+          </tr>
+          <tr>
+            <td>save the file</td>
+            <td>continues about a second later</td>
+          </tr>
+          <tr>
+            <td>pause the video yourself</td>
+            <td><strong>never</strong> starts it again by itself</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>Stay in control</h2>
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Action</th>
+            <th scope="col">In VS Code</th>
+            <th scope="col">In Chrome</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Pause or play</td>
+            <td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>P</kbd></td>
+            <td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd></td>
+          </tr>
+          <tr>
+            <td>I'm done – continue now</td>
+            <td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd></td>
+            <td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd></td>
+          </tr>
+          <tr>
+            <td>Turn CodeAlong off for a while</td>
+            <td>Click <em>CodeAlong</em> in the status bar</td>
+            <td>Switch in the toolbar popup</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>Timing (idle delay, rewind, resume on save) lives in VS Code: Settings → search for "CodeAlong".</p>
+
+      <h2>Privacy</h2>
+      <p>
+        No account, no cloud and no analytics. Your code never leaves VS Code; only signals like "typing" and "saved"
+        travel to Chrome, over a connection that stays on your computer.
+        <a id="privacy-link" href="#" target="_blank" rel="noopener">Read the privacy policy</a>.
+      </p>
+    </main>
+    <script src="welcome.js"></script>
+  </body>
+</html>

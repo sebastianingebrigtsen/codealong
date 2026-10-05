@@ -14,7 +14,8 @@ import { HubServer } from './server';
 export type NodeRole = 'starting' | 'leader' | 'follower' | 'error' | 'stopped';
 
 export interface HubNodeOptions {
-  port: number;
+  /** Candidate loopback ports, in order of preference (normally HUB_PORTS). */
+  ports: readonly number[];
   editorToken: string;
   allowedOrigins: () => readonly string[];
   settings: () => CoreSettings;
@@ -27,29 +28,39 @@ export interface HubNodeEvents {
   onEvent(event: LogEventName, detail?: string): void;
   /** Connection-level information, always worth showing in the log. */
   info(message: string): void;
+  /** The other side (Chrome or another VS Code window) runs an incompatible CodeAlong version. */
+  onIncompatible?(): void;
 }
 
-const HANDSHAKE_TIMEOUT_MS = 3_000;
-const MAX_RETRY_MS = 5_000;
-const FOREIGN_PORT_RETRY_MS = 10_000;
+type PortProbe = 'follower' | 'free' | 'foreign';
+
+const HANDSHAKE_TIMEOUT_MS = 1_500;
+const ALL_PORTS_BUSY_RETRY_MS = 15_000;
 
 /**
- * Every VS Code window runs one HubNode. Exactly one of them – whoever binds the port first – is
- * the *leader*: it runs the WebSocket hub and the state machine. Other windows become
- * *followers*: they connect to the leader as authenticated "editor" clients and forward their
- * typing/save signals and hotkeys. When the leader window closes, followers race to bind the
- * port and one of them takes over. The Chrome extension simply reconnects.
+ * Every VS Code window runs one HubNode. Exactly one of them is the *leader*: it runs the local
+ * hub (server + state machine). The other windows are *followers*: they connect to the leader as
+ * authenticated "editor" clients and forward their typing/save signals and hotkeys.
+ *
+ * Election, run on start and whenever a follower loses its leader:
+ *   1. Try each candidate port in order and join the first one that answers as a CodeAlong hub.
+ *   2. Otherwise listen on the first port that is free (ports used by other programs are skipped).
+ *   3. If that bind races with another window (EADDRINUSE), start over shortly; the winner will
+ *      then be found in step 1.
+ * The Chrome extension probes the same port list, so neither side needs a configured port.
  */
 export class HubNode {
   role: NodeRole = 'starting';
   lastError: string | null = null;
+  /** Port of the hub this window leads or follows. */
+  port: number | null = null;
   private server: HubServer | null = null;
   private runner: CoreRunner | null = null;
   private follower: WebSocket | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
-  private failures = 0;
   private commandId = 0;
   private stopped = false;
+  private electing = false;
 
   constructor(
     private readonly options: HubNodeOptions,
@@ -58,12 +69,13 @@ export class HubNode {
 
   start(): void {
     this.stopped = false;
-    void this.tryLead();
+    void this.elect();
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
     this.role = 'stopped';
+    this.port = null;
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
     this.follower?.terminate();
@@ -91,8 +103,37 @@ export class HubNode {
 
   // ---------------------------------------------------------------------------
 
-  private async tryLead(): Promise<void> {
-    if (this.stopped) return;
+  private async elect(): Promise<void> {
+    if (this.stopped || this.electing) return;
+    this.electing = true;
+    try {
+      const probes = new Map<number, PortProbe>();
+      for (const port of this.options.ports) {
+        const result = await this.tryFollow(port);
+        if (this.stopped) return;
+        if (result === 'follower') return;
+        probes.set(port, result);
+      }
+      for (const port of this.options.ports) {
+        if (probes.get(port) !== 'free') continue;
+        const outcome = await this.tryLead(port);
+        if (outcome === 'leader' || this.stopped) return;
+        if (outcome === 'raced') {
+          // Another window bound this port a moment ago: it is the hub now, go and join it.
+          this.scheduleRetry(100 + Math.random() * 300);
+          return;
+        }
+      }
+      this.fail(
+        'CodeAlong could not start its local connection: all of its ports are used by other programs.',
+        ALL_PORTS_BUSY_RETRY_MS,
+      );
+    } finally {
+      this.electing = false;
+    }
+  }
+
+  private async tryLead(port: number): Promise<'leader' | 'raced' | 'failed'> {
     const runner = new CoreRunner(this.options.settings(), {
       sendCommand: (command) => {
         this.server?.sendToBrowser({ type: 'command', id: ++this.commandId, ...command });
@@ -124,102 +165,110 @@ export class HubNode {
           if (msg.type === 'activity') runner.dispatch({ type: msg.kind });
           else runner.dispatch({ type: 'control', action: msg.action });
         },
+        onIncompatibleClient: () => this.events.onIncompatible?.(),
         log: (message) => this.events.info(message),
       },
     );
 
     try {
-      await server.listen(this.options.port);
+      await server.listen(port);
     } catch (err) {
       runner.dispose();
-      if (this.stopped) return;
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'EADDRINUSE') return this.tryFollow();
-      this.fail(`Could not listen on 127.0.0.1:${this.options.port}: ${(err as Error).message}`, MAX_RETRY_MS);
-      return;
+      return (err as NodeJS.ErrnoException).code === 'EADDRINUSE' ? 'raced' : 'failed';
     }
     if (this.stopped) {
       runner.dispose();
       await server.close();
-      return;
+      return 'failed';
     }
     this.server = server;
     this.runner = runner;
     this.role = 'leader';
-    this.failures = 0;
+    this.port = port;
     this.lastError = null;
-    this.events.info(`Hub listening on 127.0.0.1:${this.options.port}`);
+    this.events.info(`Local connection ready (127.0.0.1:${port}); this window hosts CodeAlong.`);
     runner.dispatch({ type: 'settings', settings: this.options.settings() });
     this.events.onStatus(runner.status(), 'leader');
+    return 'leader';
   }
 
-  private tryFollow(): void {
-    if (this.stopped) return;
-    this.lastError = null;
-    const ws = new WebSocket(`ws://127.0.0.1:${this.options.port}`, { maxPayload: 64 * 1024 });
-    this.follower = ws;
-    let welcomed = false;
-    const handshake = setTimeout(() => {
-      this.lastError = `Port ${this.options.port} is used by another program. Change "codealong.port" (and the port in the Chrome extension).`;
-      ws.terminate();
-    }, HANDSHAKE_TIMEOUT_MS);
+  /** Resolves 'follower' once welcomed (and stays connected), 'free' if nothing listens, else 'foreign'. */
+  private tryFollow(port: number): Promise<PortProbe> {
+    return new Promise((resolve) => {
+      let settled = false;
+      let welcomed = false;
+      const settle = (r: PortProbe) => {
+        if (!settled) {
+          settled = true;
+          resolve(r);
+        }
+      };
+      const ws = new WebSocket(`ws://127.0.0.1:${port}`, {
+        maxPayload: 64 * 1024,
+        handshakeTimeout: HANDSHAKE_TIMEOUT_MS,
+      });
+      const handshake = setTimeout(() => ws.terminate(), HANDSHAKE_TIMEOUT_MS);
 
-    ws.on('open', () => {
-      ws.send(
-        JSON.stringify({
-          type: 'hello',
-          protocol: PROTOCOL_VERSION,
-          role: 'editor',
-          token: this.options.editorToken,
-          client: 'vscode-window',
-        } satisfies EditorToHub),
-      );
-    });
-    ws.on('message', (data) => {
-      const msg = parseHubMessage(data.toString());
-      if (!msg) return;
-      switch (msg.type) {
-        case 'welcome':
-          welcomed = true;
-          clearTimeout(handshake);
-          this.role = 'follower';
-          this.failures = 0;
-          this.lastError = null;
-          this.events.info('Connected to the CodeAlong hub in another VS Code window');
-          this.events.onStatus(null, 'follower');
-          break;
-        case 'status':
-          this.events.onStatus(msg.status, 'follower');
-          break;
-        case 'ping':
-          ws.send(JSON.stringify({ type: 'pong' }));
-          break;
-        case 'error':
-          this.lastError = msg.message;
-          this.events.info(`Hub refused this window: ${msg.message}`);
-          break;
-        default:
-          break;
-      }
-    });
-    ws.on('error', () => {
-      // 'close' follows and handles it.
-    });
-    ws.on('close', () => {
-      clearTimeout(handshake);
-      if (this.follower === ws) this.follower = null;
-      if (this.stopped) return;
-      if (welcomed) {
-        this.events.info('Hub window went away; taking over or reconnecting');
+      ws.on('open', () => {
+        ws.send(
+          JSON.stringify({
+            type: 'hello',
+            protocol: PROTOCOL_VERSION,
+            role: 'editor',
+            token: this.options.editorToken,
+            client: 'vscode-window',
+          } satisfies EditorToHub),
+        );
+      });
+      ws.on('message', (data) => {
+        const msg = parseHubMessage(data.toString());
+        if (!msg) return;
+        switch (msg.type) {
+          case 'welcome':
+            if (this.stopped) {
+              ws.terminate();
+              return;
+            }
+            welcomed = true;
+            clearTimeout(handshake);
+            this.follower = ws;
+            this.role = 'follower';
+            this.port = port;
+            this.lastError = null;
+            this.events.info('Connected to CodeAlong in another VS Code window.');
+            this.events.onStatus(null, 'follower');
+            settle('follower');
+            break;
+          case 'status':
+            this.events.onStatus(msg.status, 'follower');
+            break;
+          case 'ping':
+            ws.send(JSON.stringify({ type: 'pong' }));
+            break;
+          case 'error':
+            this.events.info(`Port ${port} refused this window: ${msg.message}`);
+            if (msg.code === 'protocol-mismatch') this.events.onIncompatible?.();
+            break;
+          default:
+            break;
+        }
+      });
+      ws.on('error', (err: NodeJS.ErrnoException) => {
+        if (!welcomed && err.code === 'ECONNREFUSED') settle('free');
+      });
+      ws.on('close', () => {
+        clearTimeout(handshake);
+        settle('foreign'); // no-op if already settled
+        if (!welcomed) return;
+        if (this.follower === ws) this.follower = null;
+        if (this.stopped) return;
+        this.events.info('The VS Code window hosting CodeAlong closed; taking over or reconnecting.');
         this.role = 'starting';
+        this.port = null;
         this.events.onStatus(null, 'starting');
         // Small random delay so several followers do not all race at the same instant.
         this.scheduleRetry(150 + Math.random() * 350);
-      } else if (this.lastError) {
-        this.fail(this.lastError, FOREIGN_PORT_RETRY_MS);
-      } else {
-        this.scheduleRetry(this.backoff());
-      }
+      });
     });
   }
 
@@ -236,16 +285,12 @@ export class HubNode {
     this.scheduleRetry(retryMs);
   }
 
-  private backoff(): number {
-    this.failures++;
-    return Math.min(MAX_RETRY_MS, 250 * 2 ** this.failures) + Math.random() * 250;
-  }
-
   private scheduleRetry(ms: number): void {
+    if (this.stopped) return;
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null;
-      void this.tryLead();
+      void this.elect();
     }, ms);
   }
 }

@@ -2,23 +2,37 @@
   "name": "codealong",
   "private": true,
   "version": "0.1.0",
-  "description": "Auto-pause and resume coding tutorials in Chrome based on your activity in VS Code.",
+  "description": "Coding tutorials that wait for you. Pauses the tutorial in Chrome while you code in VS Code.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sebastianingebrigtsen/codealong.git"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "workspaces": [
     "packages/protocol",
     "packages/vscode",
     "packages/chrome"
   ],
   "scripts": {
+    "dev": "node scripts/build.mjs --watch",
     "build": "node scripts/build.mjs",
-    "watch": "node scripts/build.mjs --watch",
-    "typecheck": "tsc -p packages/protocol --noEmit && tsc -p packages/vscode --noEmit && tsc -p packages/chrome --noEmit",
+    "build:release": "node scripts/build.mjs --release",
+    "typecheck": "tsc -p packages/protocol --noEmit && tsc -p packages/vscode --noEmit && tsc -p packages/chrome --noEmit && tsc -p tsconfig.test.json",
     "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "npm run build && vitest run --config e2e/vitest.config.ts",
-    "package:vscode": "npm run build && cd packages/vscode && vsce package --no-dependencies --allow-missing-repository --skip-license -o ../../dist/codealong-vscode.vsix",
-    "check": "npm run typecheck && npm run lint && npm test && npm run build",
-    "test:vscode": "npm run build && node e2e/vscode/run.mjs"
+    "test:vscode": "npm run build && node e2e/vscode/run.mjs",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build",
+    "assets": "node scripts/assets.mjs",
+    "package": "node scripts/package.mjs",
+    "version:set": "node scripts/versions.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -32,10 +46,10 @@
     "eslint": "^10.11.0",
     "globals": "^17.13.0",
     "playwright": "^1.63.0",
+    "prettier": "^3.9.9",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.71.0",
     "vite": "^8.0.0",
     "vitest": "^5.0.3"
-  },
-  "type": "module"
+  }
 }

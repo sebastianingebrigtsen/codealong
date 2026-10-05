@@ -19,6 +19,11 @@ export default tseslint.config(
     languageOptions: { globals: globals.node },
   },
   {
+    // Runs inside the browser via Playwright.
+    files: ['scripts/assets.mjs'],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
+  },
+  {
     files: ['**/*.cjs'],
     languageOptions: { sourceType: 'commonjs', globals: globals.node },
     rules: { '@typescript-eslint/no-require-imports': 'off' },

@@ -1,4 +1,8 @@
 **
 !dist/extension.js
+!images/icon.png
+!media/**
 !package.json
 !README.md
+!CHANGELOG.md
+!LICENSE

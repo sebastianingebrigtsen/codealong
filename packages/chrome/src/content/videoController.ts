@@ -246,8 +246,7 @@ export class VideoController {
     const at = marker.lastIndexOf('@');
     const pauseId = marker.slice(0, at);
     const time = Number(marker.slice(at + 1));
-    const stillOurs =
-      at > 0 && this.video.paused && !this.video.ended && Math.abs(this.video.currentTime - time) < 0.5;
+    const stillOurs = at > 0 && this.video.paused && !this.video.ended && Math.abs(this.video.currentTime - time) < 0.5;
     if (stillOurs) {
       this.setOwner('codealong', pauseId);
     } else {

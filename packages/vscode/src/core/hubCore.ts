@@ -89,8 +89,7 @@ export type LogEventName =
   | 'COMMAND_TIMEOUT';
 
 export type CoreEffect =
-  | { type: 'send'; command: VideoCommand }
-  | { type: 'log'; event: LogEventName; detail?: string };
+  { type: 'send'; command: VideoCommand } | { type: 'log'; event: LogEventName; detail?: string };
 
 type Pending = { kind: 'pause' | 'resume'; pauseId: string; deadline: number };
 

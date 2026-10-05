@@ -34,7 +34,7 @@ export type PopupRequest =
   | { type: 'popup:unfollow' }
   | { type: 'popup:setEnabled'; enabled: boolean }
   | { type: 'popup:setDebug'; debug: boolean }
-  | { type: 'popup:setPort'; port: number }
+  | { type: 'popup:probe' }
   | { type: 'popup:control'; action: ControlAction };
 
 export type ConnectionState = 'off' | 'connecting' | 'connected' | 'error';
@@ -42,13 +42,20 @@ export type ConnectionState = 'off' | 'connecting' | 'connected' | 'error';
 export interface PopupStatus {
   enabled: boolean;
   debug: boolean;
-  port: number;
   connection: ConnectionState;
-  connectionError: string | null;
+  /** The last connection attempt failed because the two extensions are incompatible versions. */
+  incompatible: boolean;
   tutorial: { tabId: number; title: string; host: string } | null;
   video: VideoState | null;
   hub: HubStatus | null;
   log: string[];
+}
+
+export interface ProbeResult {
+  /** CodeAlong for VS Code is running and reachable. */
+  vscode: boolean;
+  /** VS Code answered, but speaks another protocol version: one side needs an update. */
+  incompatible: boolean;
 }
 
 export interface FollowResult {

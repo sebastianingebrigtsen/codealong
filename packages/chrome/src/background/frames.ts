@@ -36,7 +36,14 @@ export class FrameTracker {
   }
 
   private choose(): void {
-    const candidates = [...this.frames].map(([key, f]) => ({ key, area: f.area, playing: f.state.status === 'playing' }));
-    this.primary = chooseCandidate(candidates, this.primary !== null && this.frames.has(this.primary) ? this.primary : null);
+    const candidates = [...this.frames].map(([key, f]) => ({
+      key,
+      area: f.area,
+      playing: f.state.status === 'playing',
+    }));
+    this.primary = chooseCandidate(
+      candidates,
+      this.primary !== null && this.frames.has(this.primary) ? this.primary : null,
+    );
   }
 }

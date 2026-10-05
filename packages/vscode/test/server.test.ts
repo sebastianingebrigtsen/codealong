@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
-import { CHROME_EXTENSION_ID, PROTOCOL_VERSION, parseHubMessage, type HubToClient } from '@codealong/protocol';
+import { DEV_CHROME_EXTENSION_ID, PROTOCOL_VERSION, parseHubMessage, type HubToClient } from '@codealong/protocol';
 import { HubServer } from '../src/hub/server';
 
-const ORIGIN = `chrome-extension://${CHROME_EXTENSION_ID}`;
+const ORIGIN = `chrome-extension://${DEV_CHROME_EXTENSION_ID}`;
 const TOKEN = 'a'.repeat(64);
 
 let server: HubServer | null = null;
@@ -15,6 +15,7 @@ afterEach(async () => {
 async function startServer() {
   const events: string[] = [];
   const browserMessages: unknown[] = [];
+  const incompatible: number[] = [];
   server = new HubServer(
     { allowedOrigins: () => [ORIGIN], editorToken: TOKEN, hubName: 'test' },
     {
@@ -22,11 +23,12 @@ async function startServer() {
       onBrowserDisconnected: () => events.push('disconnected'),
       onBrowserMessage: (m) => browserMessages.push(m),
       onEditorMessage: (m) => browserMessages.push(m),
+      onIncompatibleClient: (_role, protocol) => incompatible.push(protocol),
       log: () => undefined,
     },
   );
   await server.listen(0);
-  return { port: server.address()!, events, browserMessages };
+  return { port: server.address()!, events, browserMessages, incompatible };
 }
 
 /** Opens a client and collects parsed messages; resolves once the socket is open or fails. */
@@ -70,7 +72,12 @@ describe('HubServer access control', () => {
 
   it('rejects web pages (any other Origin) before the WebSocket handshake', async () => {
     const { port, events } = await startServer();
-    for (const origin of ['https://evil.example', 'http://localhost:3000', 'chrome-extension://abcdefghijklmnopabcdefghijklmnop', 'null']) {
+    for (const origin of [
+      'https://evil.example',
+      'http://localhost:3000',
+      'chrome-extension://abcdefghijklmnopabcdefghijklmnop',
+      'null',
+    ]) {
       const c = client(port, { Origin: origin });
       expect(await c.opened).toBe(403);
     }
@@ -119,12 +126,13 @@ describe('HubServer access control', () => {
   });
 
   it('rejects other protocol versions with a clear error', async () => {
-    const { port } = await startServer();
+    const { port, incompatible } = await startServer();
     const c = client(port, { Origin: ORIGIN });
     await c.opened;
     c.ws.send(JSON.stringify({ type: 'hello', protocol: 999, role: 'browser', client: 'x' }));
     expect(await c.closed).toBe(4004);
     expect(c.messages[0]).toMatchObject({ type: 'error', code: 'protocol-mismatch' });
+    expect(incompatible).toEqual([999]); // VS Code can tell the user to update
   });
 
   it('a newer browser connection replaces the old one without a disconnect blip', async () => {

@@ -3,40 +3,58 @@
   <head>
     <meta charset="utf-8" />
     <title>CodeAlong</title>
-    <link rel="stylesheet" href="popup.css" />
+    <link rel="stylesheet" href="ui.css" />
   </head>
-  <body>
-    <header>
+  <body class="popup">
+    <header class="header">
+      <img src="icons/32.png" width="20" height="20" alt="" />
       <h1>CodeAlong</h1>
-      <label class="switch" title="Turn CodeAlong on/off in Chrome">
-        <input type="checkbox" id="enabled" />
-        <span>On</span>
+      <label class="switch">
+        <input type="checkbox" id="enabled" role="switch" aria-describedby="enabled-hint" />
+        <span class="switch-track" aria-hidden="true"></span>
+        <span id="enabled-hint" class="visually-hidden">Turn CodeAlong on or off</span>
       </label>
     </header>
 
-    <section class="rows">
-      <div class="row"><span class="label">VS Code</span><span id="connection" class="value">–</span></div>
-      <div class="row"><span class="label">Tutorial</span><span id="tutorial" class="value">None</span></div>
-      <div class="row"><span class="label">Video</span><span id="video" class="value">–</span></div>
-      <div class="row"><span class="label">Status</span><span id="phase" class="value">–</span></div>
+    <section class="card" aria-live="polite" aria-atomic="true">
+      <p id="headline" class="headline">Loading…</p>
+      <p id="detail" class="detail"></p>
     </section>
 
-    <p id="error" class="error" hidden></p>
-
-    <section class="actions">
-      <button id="follow" class="primary">Follow this tab</button>
-      <div class="controls">
-        <button id="toggle" title="Pause/resume the tutorial (Alt+Shift+P)">Pause / Play</button>
-        <button id="done" title="I'm done – continue the tutorial (Alt+Shift+D)">I'm done</button>
+    <dl class="facts">
+      <div>
+        <dt>VS Code</dt>
+        <dd id="vscode">–</dd>
       </div>
-    </section>
+      <div>
+        <dt>Tutorial</dt>
+        <dd id="tutorial">None</dd>
+      </div>
+      <div>
+        <dt>Video</dt>
+        <dd id="video">–</dd>
+      </div>
+    </dl>
 
-    <details>
-      <summary>Advanced</summary>
-      <label class="field">Port <input type="number" id="port" min="1024" max="65535" /></label>
-      <label class="field"><input type="checkbox" id="debug" /> Debug logging</label>
-      <ol id="log" class="log"></ol>
-    </details>
+    <p id="error" class="error" role="alert" hidden></p>
+
+    <div class="actions">
+      <button id="follow" type="button" class="primary">Follow this tab</button>
+      <div class="row">
+        <button id="toggle" type="button" title="Pause or play the tutorial (Alt+Shift+P)">Pause / Play</button>
+        <button id="done" type="button" title="I'm done – continue the tutorial (Alt+Shift+D)">I'm done</button>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <a href="welcome.html" target="_blank">How it works</a>
+      <a id="privacy" href="#" target="_blank" rel="noopener">Privacy</a>
+      <details>
+        <summary>Troubleshooting</summary>
+        <label class="check"><input type="checkbox" id="debug" /> Show event log</label>
+        <ol id="log" class="log" aria-label="Recent CodeAlong events"></ol>
+      </details>
+    </footer>
 
     <script src="popup.js"></script>
   </body>

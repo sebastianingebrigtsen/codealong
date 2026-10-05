@@ -5,13 +5,15 @@
  *   <-> HubConnection (Chrome service worker side) <-> VideoController <-> FakeVideo
  */
 import * as fs from 'node:fs';
+import * as http from 'node:http';
 import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { WebSocket } from 'ws';
-import { CHROME_EXTENSION_ID, type HubStatus, type VideoCommand } from '@codealong/protocol';
+import { WebSocket, WebSocketServer } from 'ws';
+import { DEV_CHROME_EXTENSION_ID, type HubStatus, type VideoCommand } from '@codealong/protocol';
 import { HubConnection, type SocketLike } from '../packages/chrome/src/background/connection';
+import { probeHub } from '../packages/chrome/src/background/probe';
 import { VideoController } from '../packages/chrome/src/content/videoController';
 import { DEFAULT_SETTINGS, type CoreSettings } from '../packages/vscode/src/core/hubCore';
 import { HubNode } from '../packages/vscode/src/hub/hubNode';
@@ -41,14 +43,14 @@ async function waitFor(cond: () => boolean, what: string, ms = 4_000): Promise<v
   }
 }
 
-function startNode(port: number, token: string, settings: Partial<CoreSettings> = {}) {
+function startNode(port: number | number[], token: string, settings: Partial<CoreSettings> = {}) {
   const events: string[] = [];
   let status: HubStatus | null = null;
   const node = new HubNode(
     {
-      port,
+      ports: Array.isArray(port) ? port : [port],
       editorToken: token,
-      allowedOrigins: () => [`chrome-extension://${CHROME_EXTENSION_ID}`],
+      allowedOrigins: () => [`chrome-extension://${DEV_CHROME_EXTENSION_ID}`],
       settings: () => ({ ...DEFAULT_SETTINGS, idleDelayMs: IDLE_MS, ...settings }),
     },
     {
@@ -65,7 +67,7 @@ function startNode(port: number, token: string, settings: Partial<CoreSettings> 
 }
 
 /** The Chrome side: service-worker connection + content-script controller on a fake video. */
-function startBrowser(port: number) {
+function startBrowser(port: number | number[]) {
   const video = new FakeVideo();
   video.currentTime = 30;
   void video.play();
@@ -74,7 +76,7 @@ function startBrowser(port: number) {
   const holder: { controller?: VideoController } = {};
 
   const connection = new HubConnection(
-    () => `ws://127.0.0.1:${port}`,
+    () => (Array.isArray(port) ? port : [port]).map((p) => `ws://127.0.0.1:${p}`),
     {
       onConnected: () => {
         connection.send({ type: 'tutorial', tutorial: { tabId: 1, title: 'Tutorial', host: 'youtube.com' } });
@@ -89,9 +91,14 @@ function startBrowser(port: number) {
       onStatus: () => undefined,
       log: () => undefined,
     },
-    (url) => new WebSocket(url, { headers: { Origin: `chrome-extension://${CHROME_EXTENSION_ID}` } }) as unknown as SocketLike,
+    (url) =>
+      new WebSocket(url, {
+        headers: { Origin: `chrome-extension://${DEV_CHROME_EXTENSION_ID}` },
+      }) as unknown as SocketLike,
   );
-  const controller = new VideoController(video, (state, cause) => connection.send({ type: 'video', video: state, cause }));
+  const controller = new VideoController(video, (state, cause) =>
+    connection.send({ type: 'video', video: state, cause }),
+  );
   holder.controller = controller;
   controller.attach();
   connection.ensure();
@@ -127,7 +134,13 @@ describe('full loop', () => {
     // The browser's acknowledgement travels over the socket after the video already plays.
     await waitFor(() => hub.events.includes('VIDEO_RESUMED'), 'hub got the resume acknowledgement');
     expect(hub.events).toEqual(
-      expect.arrayContaining(['TYPING_STARTED', 'VIDEO_PAUSED_BY_CODEALONG', 'TYPING_IDLE', 'AUTO_RESUME', 'VIDEO_RESUMED']),
+      expect.arrayContaining([
+        'TYPING_STARTED',
+        'VIDEO_PAUSED_BY_CODEALONG',
+        'TYPING_IDLE',
+        'AUTO_RESUME',
+        'VIDEO_RESUMED',
+      ]),
     );
   });
 
@@ -192,4 +205,63 @@ describe('full loop', () => {
     await waitFor(() => browser.connection.connected, 'browser connected after VS Code started', 6_000);
     await waitFor(() => hub.status()?.phase === 'playing', 'hub sees the video');
   }, 10_000);
+
+  it('skips a port used by another program, on both sides, without any configuration', async () => {
+    const [busy, next] = [await freePort(), await freePort()];
+    const foreign = http.createServer((_req, res) => res.writeHead(404).end('not CodeAlong'));
+    await new Promise<void>((r) => foreign.listen(busy, '127.0.0.1', r));
+    cleanups.push(() => new Promise<void>((r) => foreign.close(() => r())));
+
+    const hub = startNode([busy, next], loadOrCreateEditorToken(tempTokenDir()));
+    await waitFor(() => hub.node.role === 'leader', 'hub leads on the free port');
+    expect(hub.node.port).toBe(next);
+    const browser = startBrowser([busy, next]);
+    await waitFor(() => browser.connection.connected, 'browser finds the hub on the second port');
+    hub.node.activity('edit');
+    await waitFor(() => browser.video.paused, 'pause works');
+  });
+
+  it('two VS Code windows starting at the same moment agree on one hub', async () => {
+    const ports = [await freePort(), await freePort()];
+    const token = loadOrCreateEditorToken(tempTokenDir());
+    const a = startNode(ports, token);
+    const b = startNode(ports, token);
+    await waitFor(
+      () => [a.node.role, b.node.role].sort().join() === 'follower,leader',
+      'one leader and one follower',
+      6_000,
+    );
+    expect(a.node.port).toBe(b.node.port);
+  }, 10_000);
+
+  it('a probe sees the hub without disturbing the active browser connection', async () => {
+    const port = await freePort();
+    const hub = startNode(port, loadOrCreateEditorToken(tempTokenDir()));
+    const browser = startBrowser(port);
+    await waitFor(() => hub.status()?.phase === 'playing', 'connected');
+    const ws = (url: string) =>
+      new WebSocket(url, {
+        headers: { Origin: `chrome-extension://${DEV_CHROME_EXTENSION_ID}` },
+      }) as unknown as SocketLike;
+    expect(await probeHub([`ws://127.0.0.1:${port}`], ws)).toBe('found');
+    expect(await probeHub([`ws://127.0.0.1:${await freePort()}`], ws)).toBe('missing');
+    await new Promise((r) => setTimeout(r, 100));
+    expect(browser.connection.connected).toBe(true);
+    expect(hub.status()?.browserConnected).toBe(true);
+    expect(hub.events).not.toContain('CONNECTION_LOST');
+  });
+
+  it('a probe reports an outdated VS Code extension as incompatible, not as missing', async () => {
+    const port = await freePort();
+    // Stands in for a hub from an older/newer release.
+    const old = new WebSocketServer({ host: '127.0.0.1', port });
+    old.on('connection', (sock) =>
+      sock.on('message', () => {
+        sock.send(JSON.stringify({ type: 'error', code: 'protocol-mismatch', message: 'Update both extensions.' }));
+        sock.close();
+      }),
+    );
+    cleanups.push(() => new Promise<void>((r) => old.close(() => r())));
+    expect(await probeHub([`ws://127.0.0.1:${port}`])).toBe('incompatible');
+  });
 });

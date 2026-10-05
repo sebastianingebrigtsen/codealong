@@ -1,6 +1,11 @@
 node_modules/
 dist/
 *.vsix
+*.zip
 .DS_Store
-e2e/.artifacts/
+Thumbs.db
 .vscode-test/
+e2e/.artifacts/
+# Copied in by scripts/package.mjs while packaging the VS Code extension.
+packages/vscode/LICENSE
+packages/vscode/CHANGELOG.md

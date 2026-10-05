@@ -4,18 +4,51 @@
  * Transport: one WebSocket per client, JSON text frames, hub listens on 127.0.0.1 only.
  * Clients:
  *   - "browser": the Chrome extension service worker. Authenticated by its Origin header
- *     (chrome-extension://<pinned id>), which web pages cannot forge.
+ *     (chrome-extension://<id>), which web pages cannot forge. Only known IDs are accepted.
  *   - "editor": additional VS Code windows. Authenticated by a shared secret in a
- *     user-only (0600) token file. They must not send an Origin header.
+ *     user-only token file. They must not send an Origin header.
  *
  * Source code never travels over this protocol – only activity signals and video state.
+ * See docs/ARCHITECTURE.md and SECURITY.md.
  */
 
 export const PROTOCOL_VERSION = 1;
-export const DEFAULT_PORT = 47390;
 
-/** ID of the Chrome extension, pinned via the "key" field in its manifest. */
-export const CHROME_EXTENSION_ID = 'golihbblpnhanlhgnnngcfhmolomajoo';
+/**
+ * Loopback ports the hub may listen on, in order of preference. If another program already uses
+ * the first one, the hub moves to the next and the browser finds it by probing the same list, so
+ * nobody ever has to configure a port.
+ */
+export const HUB_PORTS: readonly number[] = [47390, 47391, 47392];
+
+/**
+ * Parses a comma-separated port list ("48390,48391"). Used only by tests and contributors (env var
+ * CODEALONG_HUB_PORTS) so automated tests never collide with a real CodeAlong on the same machine.
+ */
+export function parsePortList(value: string | undefined): number[] | null {
+  if (!value) return null;
+  const ports = value.split(',').map((p) => Number(p.trim()));
+  return ports.length > 0 && ports.every((p) => Number.isInteger(p) && p > 1024 && p < 65536) ? ports : null;
+}
+
+/**
+ * ID of development builds of the Chrome extension. Pinned by the public `key` in
+ * packages/chrome/manifest.json so "Load unpacked" always yields the same ID.
+ */
+export const DEV_CHROME_EXTENSION_ID = 'golihbblpnhanlhgnnngcfhmolomajoo';
+
+/**
+ * ID assigned by the Chrome Web Store (the store does not accept the `key` field and picks its
+ * own ID on the first upload). Must be filled in before the first public release; the release
+ * script refuses to package without it. See docs/RELEASING.md.
+ */
+export const STORE_CHROME_EXTENSION_ID: string | null = null;
+
+/** Chrome extensions allowed to connect to the hub. */
+export const ALLOWED_CHROME_EXTENSION_IDS: readonly string[] = [
+  DEV_CHROME_EXTENSION_ID,
+  STORE_CHROME_EXTENSION_ID,
+].filter((id): id is string => typeof id === 'string' && /^[a-p]{32}$/.test(id));
 
 export const HEARTBEAT_INTERVAL_MS = 20_000;
 export const MAX_MESSAGE_BYTES = 16 * 1024;
@@ -69,6 +102,12 @@ export interface HelloMessage {
   /** Required for role "editor". */
   token?: string;
   client: string;
+  /**
+   * Only checks that a hub is reachable (used by the browser's onboarding/popup and by VS Code
+   * windows looking for an existing hub). The hub answers with "welcome" and closes; a probe
+   * never replaces the active browser connection.
+   */
+  probe?: boolean;
 }
 
 export interface WelcomeMessage {
@@ -167,13 +206,7 @@ export type StatusPhase =
   | 'ended';
 
 export type BrowserToHub =
-  | HelloMessage
-  | PongMessage
-  | PingMessage
-  | TutorialMessage
-  | VideoMessage
-  | FocusMessage
-  | BrowserControlMessage;
+  HelloMessage | PongMessage | PingMessage | TutorialMessage | VideoMessage | FocusMessage | BrowserControlMessage;
 
 export type EditorToHub = HelloMessage | PongMessage | PingMessage | ActivityMessage | EditorControlMessage;
 
@@ -239,7 +272,11 @@ function parseHello(m: Json): HelloMessage | null {
   if (m.role !== 'browser' && m.role !== 'editor') return null;
   if (m.token !== undefined && !isShortString(m.token, 256)) return null;
   if (!isShortString(m.client, 128)) return null;
-  return { type: 'hello', protocol: m.protocol, role: m.role, token: m.token as string | undefined, client: m.client };
+  if (m.probe !== undefined && typeof m.probe !== 'boolean') return null;
+  const hello: HelloMessage = { type: 'hello', protocol: m.protocol, role: m.role, client: m.client };
+  if (m.token !== undefined) hello.token = m.token as string;
+  if (m.probe) hello.probe = true;
+  return hello;
 }
 
 export function parseBrowserMessage(raw: string): BrowserToHub | null {
@@ -342,7 +379,9 @@ export function parseHubMessage(raw: string): HubToClient | null {
       if (!isFiniteNumber(m.id)) return null;
       switch (m.command) {
         case 'pause':
-          return isShortString(m.pauseId, 64) ? { type: 'command', id: m.id, command: 'pause', pauseId: m.pauseId } : null;
+          return isShortString(m.pauseId, 64)
+            ? { type: 'command', id: m.id, command: 'pause', pauseId: m.pauseId }
+            : null;
         case 'resume':
           return isShortString(m.pauseId, 64) && isFiniteNumber(m.rewindSeconds) && m.rewindSeconds >= 0
             ? { type: 'command', id: m.id, command: 'resume', pauseId: m.pauseId, rewindSeconds: m.rewindSeconds }

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const WsClient = require(path.join(process.env.CODEALONG_ROOT, 'node_modules/ws')).WebSocket;
 
-const PORT = 47391;
+const PORT = 48395; // matches CODEALONG_HUB_PORTS in run.mjs
 const ORIGIN = 'chrome-extension://golihbblpnhanlhgnnngcfhmolomajoo';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -36,7 +36,12 @@ function fakeBrowser() {
         Object.assign(video, { status: 'paused', owner: 'codealong', pauseId: msg.pauseId });
         report('codealong-pause');
       } else if (msg.command === 'resume' && video.owner === 'codealong' && video.pauseId === msg.pauseId) {
-        Object.assign(video, { status: 'playing', owner: null, pauseId: null, currentTime: Math.max(0, video.currentTime - msg.rewindSeconds) });
+        Object.assign(video, {
+          status: 'playing',
+          owner: null,
+          pauseId: null,
+          currentTime: Math.max(0, video.currentTime - msg.rewindSeconds),
+        });
         report('codealong-resume');
       } else if (msg.command === 'userToggle') {
         if (video.status === 'playing') Object.assign(video, { status: 'paused', owner: 'user' });
@@ -45,7 +50,15 @@ function fakeBrowser() {
       }
     }
   });
-  return { ws, commands, video, opened: new Promise((r, j) => { ws.on('open', r); ws.on('error', j); }) };
+  return {
+    ws,
+    commands,
+    video,
+    opened: new Promise((r, j) => {
+      ws.on('open', r);
+      ws.on('error', j);
+    }),
+  };
 }
 
 exports.run = async function run() {
@@ -57,17 +70,32 @@ exports.run = async function run() {
 
   const cfg = vscode.workspace.getConfiguration('codealong');
   const G = vscode.ConfigurationTarget.Global;
-  await cfg.update('port', PORT, G);
   await cfg.update('idleDelaySeconds', 1, G);
-  await cfg.update('debug', true, G);
+  await cfg.update('debugLogging', true, G);
 
-  const ext = vscode.extensions.getExtension('codealong.codealong');
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(process.env.CODEALONG_ROOT, 'packages/vscode/package.json'), 'utf8'),
+  );
+  const ext = vscode.extensions.getExtension(`${manifest.publisher}.${manifest.name}`);
   check('extension found', !!ext);
   await ext.activate();
   const commandIds = await vscode.commands.getCommands(true);
-  check('commands registered', ['codealong.togglePlayback', 'codealong.done', 'codealong.toggleEnabled', 'codealong.showMenu'].every((c) => commandIds.includes(c)));
+  check(
+    'commands registered',
+    [
+      'codealong.togglePlayback',
+      'codealong.done',
+      'codealong.toggleEnabled',
+      'codealong.showMenu',
+      'codealong.openWalkthrough',
+      'codealong.getChromeExtension',
+    ].every((c) => commandIds.includes(c)),
+  );
 
-  // Hub comes up (port change triggers a restart).
+  await vscode.commands.executeCommand('codealong.openWalkthrough');
+  results.push('PASS walkthrough opens');
+
+  // The hub comes up on the test port.
   let browser;
   for (let i = 0; i < 40 && !browser; i++) {
     const b = fakeBrowser();
@@ -99,7 +127,9 @@ exports.run = async function run() {
     const resume = browser.commands.find((c) => c.command === 'resume');
     check('idle resumes with rewind', resume.rewindSeconds === 2, `rewind=${resume.rewindSeconds}`);
   } else {
-    results.push('SKIP typing tests: the test window did not get OS focus (CodeAlong ignores edits in unfocused windows by design)');
+    results.push(
+      'SKIP typing tests: the test window did not get OS focus (CodeAlong ignores edits in unfocused windows by design)',
+    );
   }
 
   // Edits in a non-active document never count.
@@ -127,11 +157,18 @@ exports.run = async function run() {
     await vscode.window.showTextDocument(doc);
     const pausesBefore = browser.commands.filter((c) => c.command === 'pause').length;
     await editor.edit((b) => b.insert(new vscode.Position(0, 0), '// save test\n'));
-    await waitFor(() => browser.commands.filter((c) => c.command === 'pause').length > pausesBefore, 'pause before save');
+    await waitFor(
+      () => browser.commands.filter((c) => c.command === 'pause').length > pausesBefore,
+      'pause before save',
+    );
     const resumesBefore = browser.commands.filter((c) => c.command === 'resume').length;
     const savedAt = Date.now();
     await vscode.commands.executeCommand('workbench.action.files.save');
-    await waitFor(() => browser.commands.filter((c) => c.command === 'resume').length > resumesBefore, 'resume after save', 5000);
+    await waitFor(
+      () => browser.commands.filter((c) => c.command === 'resume').length > resumesBefore,
+      'resume after save',
+      5000,
+    );
     check('manual save resumes', Date.now() - savedAt < 4000, `${Date.now() - savedAt} ms`);
   }
 
@@ -140,6 +177,10 @@ exports.run = async function run() {
   results.push('PASS settings change applied without restart');
 
   browser.ws.close();
-  fs.writeFileSync((fs.mkdirSync(path.join(process.env.CODEALONG_ROOT, 'e2e/.artifacts'), { recursive: true }), path.join(process.env.CODEALONG_ROOT, 'e2e/.artifacts/vscode-result.txt')), results.join('\n'));
+  fs.writeFileSync(
+    (fs.mkdirSync(path.join(process.env.CODEALONG_ROOT, 'e2e/.artifacts'), { recursive: true }),
+    path.join(process.env.CODEALONG_ROOT, 'e2e/.artifacts/vscode-result.txt')),
+    results.join('\n'),
+  );
   console.log(results.join('\n'));
 };

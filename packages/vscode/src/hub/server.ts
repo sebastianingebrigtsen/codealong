@@ -27,6 +27,8 @@ export interface HubServerEvents {
   onBrowserDisconnected(): void;
   onBrowserMessage(msg: Exclude<BrowserToHub, { type: 'hello' | 'ping' | 'pong' }>): void;
   onEditorMessage(msg: Exclude<EditorToHub, { type: 'hello' | 'ping' | 'pong' }>): void;
+  /** A client speaks another protocol version: one of the extensions needs an update. */
+  onIncompatibleClient?(role: ClientRole, protocol: number): void;
   log(message: string): void;
 }
 
@@ -172,7 +174,10 @@ export class HubServer {
     }
   }
 
-  private onHello(client: Client, hello: { protocol: number; role: ClientRole; token?: string }): void {
+  private onHello(
+    client: Client,
+    hello: { protocol: number; role: ClientRole; token?: string; probe?: boolean },
+  ): void {
     clearTimeout(client.helloTimer);
     if (hello.protocol !== PROTOCOL_VERSION) {
       send(client.ws, {
@@ -180,6 +185,7 @@ export class HubServer {
         code: 'protocol-mismatch',
         message: `Protocol ${hello.protocol} not supported (hub speaks ${PROTOCOL_VERSION}). Update both extensions.`,
       });
+      this.events.onIncompatibleClient?.(hello.role, hello.protocol);
       return client.ws.close(4004, 'protocol mismatch');
     }
     const authorised =
@@ -192,6 +198,12 @@ export class HubServer {
     }
     client.role = hello.role;
     send(client.ws, { type: 'welcome', protocol: PROTOCOL_VERSION, hub: this.options.hubName });
+    if (hello.probe) {
+      // "Is CodeAlong there?" – answered, never registered, never replaces the real browser.
+      this.clients.delete(client);
+      client.ws.close(1000, 'probe');
+      return;
+    }
 
     if (hello.role === 'browser') {
       const previous = this.browser;

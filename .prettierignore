@@ -1,0 +1,7 @@
+node_modules/
+dist/
+packages/*/dist/
+package-lock.json
+.vscode-test/
+e2e/.artifacts/
+*.png

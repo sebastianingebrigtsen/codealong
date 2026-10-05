@@ -1,0 +1,36 @@
+name: Release
+
+# Builds the release artifacts for a version tag and creates a DRAFT GitHub release.
+# Nothing is published to the Chrome Web Store or the VS Code Marketplace. See docs/RELEASING.md.
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - name: Check that the tag matches the project version
+        run: |
+          version="$(node scripts/versions.mjs)"
+          test "v${version}" = "${GITHUB_REF_NAME}" || { echo "Tag ${GITHUB_REF_NAME} does not match version ${version}"; exit 1; }
+      - name: Package (requires the Chrome Web Store extension ID)
+        run: npm run package
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --draft --verify-tag \
+            --title "CodeAlong ${GITHUB_REF_NAME#v}" \
+            --notes "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/CHANGELOG.md)." \
+            dist/codealong-chrome-*.zip dist/codealong-vscode-*.vsix dist/SHA256SUMS.txt

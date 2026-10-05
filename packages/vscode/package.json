@@ -1,11 +1,39 @@
 {
   "name": "codealong",
   "displayName": "CodeAlong",
-  "description": "Pauses your coding tutorial in Chrome while you type, and resumes it when you are done.",
+  "description": "Coding tutorials that wait for you. Pauses the video in Chrome while you type and continues when you're done.",
   "version": "0.1.0",
-  "publisher": "codealong",
+  "publisher": "sebastianingebrigtsen",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "MIT",
+  "author": "Sebastian Westin Ingebrigtsen",
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#0f172a",
+    "theme": "dark"
+  },
+  "homepage": "https://github.com/sebastianingebrigtsen/codealong#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sebastianingebrigtsen/codealong.git",
+    "directory": "packages/vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/sebastianingebrigtsen/codealong/issues"
+  },
+  "qna": "https://github.com/sebastianingebrigtsen/codealong/discussions",
+  "keywords": [
+    "tutorial",
+    "video",
+    "youtube",
+    "learning",
+    "course",
+    "pause",
+    "chrome",
+    "education",
+    "code along",
+    "screencast"
+  ],
   "engines": {
     "vscode": "^1.95.0"
   },
@@ -20,21 +48,39 @@
   "activationEvents": [
     "onStartupFinished"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": true
+  },
   "contributes": {
     "commands": [
       {
         "command": "codealong.togglePlayback",
-        "title": "Pause / Resume Tutorial",
-        "category": "CodeAlong"
+        "title": "Pause or Play Tutorial",
+        "category": "CodeAlong",
+        "icon": "$(debug-continue)"
       },
       {
         "command": "codealong.done",
         "title": "I'm Done – Continue Tutorial",
-        "category": "CodeAlong"
+        "category": "CodeAlong",
+        "icon": "$(check)"
       },
       {
         "command": "codealong.toggleEnabled",
         "title": "Turn On/Off",
+        "category": "CodeAlong"
+      },
+      {
+        "command": "codealong.openWalkthrough",
+        "title": "How CodeAlong Works",
+        "category": "CodeAlong"
+      },
+      {
+        "command": "codealong.getChromeExtension",
+        "title": "Get the Chrome Extension",
         "category": "CodeAlong"
       },
       {
@@ -65,19 +111,22 @@
           "type": "boolean",
           "default": true,
           "scope": "application",
-          "description": "Let CodeAlong pause and resume the tutorial automatically."
+          "order": 0,
+          "description": "Let CodeAlong pause and continue the tutorial automatically. Turn off to keep CodeAlong installed but inactive."
         },
         "codealong.pauseOnTyping": {
           "type": "boolean",
           "default": true,
           "scope": "application",
-          "description": "Pause the tutorial when you start editing code."
+          "order": 1,
+          "description": "Pause the tutorial as soon as you start editing code."
         },
         "codealong.resumeAfterIdle": {
           "type": "boolean",
           "default": true,
           "scope": "application",
-          "description": "Resume the tutorial when you have stopped typing for `#codealong.idleDelaySeconds#` seconds."
+          "order": 2,
+          "markdownDescription": "Continue the tutorial when you have stopped typing for `#codealong.idleDelaySeconds#` seconds."
         },
         "codealong.idleDelaySeconds": {
           "type": "number",
@@ -85,25 +134,29 @@
           "minimum": 1,
           "maximum": 600,
           "scope": "application",
-          "description": "Seconds without typing before you are considered done."
+          "order": 3,
+          "description": "How many seconds without typing count as \"done\"."
         },
         "codealong.resumeOnSave": {
           "type": "boolean",
           "default": true,
           "scope": "application",
-          "description": "Treat a manual save (Cmd/Ctrl+S) as \"done\" and resume about a second later, unless you keep typing. Auto-save is ignored."
+          "order": 4,
+          "description": "Treat saving a file (Ctrl+S / Cmd+S) as \"done\" and continue about a second later, unless you keep typing. Auto save is ignored."
         },
         "codealong.resumeOnTutorialFocus": {
           "type": "boolean",
           "default": false,
           "scope": "application",
-          "description": "Resume when you switch back to the tutorial tab in Chrome. Handy on a single screen; with several screens it may resume when you only click the browser."
+          "order": 5,
+          "description": "Continue when you switch back to the tutorial tab in Chrome. Useful on a single screen; with two screens it may continue when you only click the browser."
         },
         "codealong.rewindBeforeResume": {
           "type": "boolean",
           "default": true,
           "scope": "application",
-          "description": "Rewind a little before an automatic resume, so you hear the end of what the instructor said."
+          "order": 6,
+          "description": "Rewind a little before continuing automatically, so you hear the end of what the instructor was saying."
         },
         "codealong.rewindSeconds": {
           "type": "number",
@@ -111,35 +164,59 @@
           "minimum": 0,
           "maximum": 60,
           "scope": "application",
-          "description": "How many seconds to rewind before an automatic resume."
+          "order": 7,
+          "description": "How many seconds to rewind before continuing automatically."
         },
-        "codealong.debug": {
+        "codealong.debugLogging": {
           "type": "boolean",
           "default": false,
           "scope": "application",
-          "description": "Write every CodeAlong event to the \"CodeAlong\" output channel. Source code is never logged."
-        },
-        "codealong.port": {
-          "type": "number",
-          "default": 47390,
-          "minimum": 1024,
-          "maximum": 65535,
-          "scope": "application",
-          "description": "Local port (127.0.0.1 only) used to talk to the Chrome extension. Must match the port in the Chrome extension."
-        },
-        "codealong.allowedChromeExtensionIds": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [
-            "golihbblpnhanlhgnnngcfhmolomajoo"
-          ],
-          "scope": "application",
-          "description": "Chrome extension IDs allowed to connect. The default is the ID of the CodeAlong extension in this repository."
+          "order": 8,
+          "markdownDescription": "Write every CodeAlong event to the **CodeAlong** output channel (for troubleshooting). Your code is never logged."
         }
       }
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "codealong.gettingStarted",
+        "title": "Get Started with CodeAlong",
+        "description": "Coding tutorials that wait for you. Set up in under a minute.",
+        "steps": [
+          {
+            "id": "chrome",
+            "title": "Add CodeAlong to Chrome",
+            "description": "CodeAlong has two halves: this VS Code extension notices when you code, and a small Chrome extension pauses and plays the video. Both are needed, and they talk to each other only on your computer.\n[Get the Chrome Extension](command:codealong.getChromeExtension)",
+            "media": {
+              "markdown": "media/walkthrough/chrome.md"
+            }
+          },
+          {
+            "id": "follow",
+            "title": "Follow a tutorial",
+            "description": "Open a tutorial in Chrome (YouTube, Laracasts, Vimeo or any site with a normal video player), click the CodeAlong icon in the toolbar and choose **Follow this tab**. The status bar in VS Code then shows **CodeAlong: Tutorial Playing**.",
+            "media": {
+              "markdown": "media/walkthrough/follow.md"
+            }
+          },
+          {
+            "id": "code",
+            "title": "Just code",
+            "description": "Start typing and the tutorial pauses. Stop typing for a few seconds, or save the file, and it continues, rewound by two seconds. If you pause the video yourself, CodeAlong never starts it again on its own.",
+            "media": {
+              "markdown": "media/walkthrough/code.md"
+            }
+          },
+          {
+            "id": "control",
+            "title": "Stay in control",
+            "description": "Use **Ctrl+Alt+P** (⌃⌥P on macOS) to pause or play and **Ctrl+Alt+D** (⌃⌥D) to continue right away. Click **CodeAlong** in the status bar to turn it off for a while or change the timing.\n[Open Settings](command:workbench.action.openSettings?%5B%22codealong%22%5D)",
+            "media": {
+              "markdown": "media/walkthrough/control.md"
+            }
+          }
+        ]
+      }
+    ]
   },
   "dependencies": {
     "@codealong/protocol": "0.1.0",

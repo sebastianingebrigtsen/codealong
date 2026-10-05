@@ -1,5 +1,6 @@
 import {
-  DEFAULT_PORT,
+  HUB_PORTS,
+  parsePortList,
   type CommandMessage,
   type HubStatus,
   type VideoCause,
@@ -11,11 +12,13 @@ import type {
   FollowResult,
   PopupRequest,
   PopupStatus,
+  ProbeResult,
   ToAgent,
 } from '../shared/messages';
 import { HubConnection } from './connection';
 import { FrameTracker } from './frames';
 import { isStaticallyCovered } from './hosts';
+import { probeHub } from './probe';
 
 /**
  * Service worker. Responsibilities:
@@ -31,7 +34,6 @@ import { isStaticallyCovered } from './hosts';
 interface Settings {
   enabled: boolean;
   debug: boolean;
-  port: number;
 }
 interface ActiveTutorial {
   tabId: number;
@@ -43,7 +45,11 @@ interface ActiveTutorial {
 const KEEPALIVE_ALARM = 'codealong-keepalive';
 const LOG_LIMIT = 40;
 
-let settings: Settings = { enabled: true, debug: false, port: DEFAULT_PORT };
+/** Set only in development builds made for automated tests (see scripts/build.mjs). */
+declare const __CODEALONG_TEST_PORTS__: string;
+const HUB_URLS = (parsePortList(__CODEALONG_TEST_PORTS__) ?? HUB_PORTS).map((port) => `ws://127.0.0.1:${port}`);
+
+let settings: Settings = { enabled: true, debug: false };
 let active: ActiveTutorial | null = null;
 let hubStatus: HubStatus | null = null;
 let lastFocusSent: boolean | null = null;
@@ -51,7 +57,7 @@ let focusedWindowId: number = chrome.windows.WINDOW_ID_NONE;
 const frames = new FrameTracker();
 const recentLog: string[] = [];
 
-const connection = new HubConnection(() => `ws://127.0.0.1:${settings.port}`, {
+const connection = new HubConnection(() => HUB_URLS, {
   onConnected() {
     lastFocusSent = null;
     sendTutorialToHub();
@@ -76,7 +82,11 @@ const ready = init();
 
 async function init(): Promise<void> {
   const stored = await chrome.storage.local.get(['settings', 'active']);
-  settings = { ...settings, ...(stored.settings as Partial<Settings> | undefined) };
+  const saved = (stored.settings ?? {}) as Partial<Settings>;
+  settings = {
+    enabled: typeof saved.enabled === 'boolean' ? saved.enabled : settings.enabled,
+    debug: typeof saved.debug === 'boolean' ? saved.debug : settings.debug,
+  };
   const candidate = stored.active as ActiveTutorial | undefined;
   // storage.session survives service-worker restarts but not extension reloads.
   const { workerStarted } = await chrome.storage.session.get('workerStarted');
@@ -111,6 +121,9 @@ async function follow(tabId: number): Promise<FollowResult> {
     host: safeHost(tab.url),
   };
   frames.clear();
+  // Tell the hub about the new tutorial *before* the agents start reporting: the hub forgets the
+  // video when the tutorial changes, so a later announcement would discard their first reports.
+  sendTutorialToHub();
   await chrome.storage.local.set({ active });
   log('TUTORIAL_ACTIVATED', active.host);
 
@@ -121,7 +134,6 @@ async function follow(tabId: number): Promise<FollowResult> {
   }
   await broadcastToTab({ type: 'agent:activate', debug: settings.debug });
   syncConnection();
-  sendTutorialToHub();
   void updateFocus();
   return { ok: true };
 }
@@ -239,7 +251,9 @@ async function control(action: 'toggle' | 'done'): Promise<void> {
   const frameId = frames.primaryFrameId();
   if (frameId === null) return;
   const command = action === 'toggle' ? ({ command: 'userToggle' } as const) : ({ command: 'userPlay' } as const);
-  await chrome.tabs.sendMessage(active.tabId, { type: 'agent:command', command } satisfies ToAgent, { frameId }).catch(() => undefined);
+  await chrome.tabs
+    .sendMessage(active.tabId, { type: 'agent:command', command } satisfies ToAgent, { frameId })
+    .catch(() => undefined);
 }
 
 async function broadcastToTab(msg: ToAgent): Promise<void> {
@@ -271,9 +285,8 @@ function popupStatus(): PopupStatus {
   return {
     enabled: settings.enabled,
     debug: settings.debug,
-    port: settings.port,
     connection: active && settings.enabled ? connection.state : 'off',
-    connectionError: connection.lastError,
+    incompatible: connection.incompatible,
     tutorial: active ? { tabId: active.tabId, title: active.title, host: active.host } : null,
     video: frames.primaryState(),
     hub: hubStatus,
@@ -324,24 +337,26 @@ function safeHost(url: string | undefined): string {
 // ---------------------------------------------------------------------------
 // Listeners (registered synchronously)
 
-chrome.runtime.onMessage.addListener((msg: AgentVideoReport | { type: 'agent:hello' } | PopupRequest, sender, sendResponse) => {
-  void (async () => {
-    await ready;
-    if (msg.type === 'agent:hello' || msg.type === 'agent:video') {
-      const isActiveTab = !!active && sender.tab?.id === active.tabId && settings.enabled;
-      if (isActiveTab && msg.type === 'agent:video' && sender.frameId !== undefined) {
-        onAgentReport(sender.frameId, msg);
-        connection.ensure(); // a report also wakes the worker: make sure we are (re)connecting
+chrome.runtime.onMessage.addListener(
+  (msg: AgentVideoReport | { type: 'agent:hello' } | PopupRequest, sender, sendResponse) => {
+    void (async () => {
+      await ready;
+      if (msg.type === 'agent:hello' || msg.type === 'agent:video') {
+        const isActiveTab = !!active && sender.tab?.id === active.tabId && settings.enabled;
+        if (isActiveTab && msg.type === 'agent:video' && sender.frameId !== undefined) {
+          onAgentReport(sender.frameId, msg);
+          connection.ensure(); // a report also wakes the worker: make sure we are (re)connecting
+        }
+        sendResponse({ active: isActiveTab, debug: settings.debug } satisfies AgentReply);
+        return;
       }
-      sendResponse({ active: isActiveTab, debug: settings.debug } satisfies AgentReply);
-      return;
-    }
-    // Popup requests are only accepted from the extension's own pages, never from content scripts.
-    const fromExtensionPage = sender.id === chrome.runtime.id && !!sender.url?.startsWith(chrome.runtime.getURL(''));
-    sendResponse(fromExtensionPage ? await handlePopup(msg) : { ok: false, error: 'forbidden' });
-  })();
-  return true; // async response
-});
+      // Popup requests are only accepted from the extension's own pages, never from content scripts.
+      const fromExtensionPage = sender.id === chrome.runtime.id && !!sender.url?.startsWith(chrome.runtime.getURL(''));
+      sendResponse(fromExtensionPage ? await handlePopup(msg) : { ok: false, error: 'forbidden' });
+    })();
+    return true; // async response
+  },
+);
 
 async function handlePopup(msg: PopupRequest): Promise<unknown> {
   switch (msg.type) {
@@ -355,18 +370,20 @@ async function handlePopup(msg: PopupRequest): Promise<unknown> {
     case 'popup:setEnabled':
       await saveSettings({ enabled: msg.enabled });
       log(msg.enabled ? 'ENABLED' : 'DISABLED');
-      await broadcastToTab(msg.enabled ? { type: 'agent:activate', debug: settings.debug } : { type: 'agent:deactivate' });
+      await broadcastToTab(
+        msg.enabled ? { type: 'agent:activate', debug: settings.debug } : { type: 'agent:deactivate' },
+      );
       syncConnection();
       return { ok: true };
     case 'popup:setDebug':
       await saveSettings({ debug: msg.debug });
       await broadcastToTab({ type: 'agent:activate', debug: msg.debug });
       return { ok: true };
-    case 'popup:setPort':
-      if (!Number.isInteger(msg.port) || msg.port < 1024 || msg.port > 65535) return { ok: false, error: 'Invalid port' };
-      await saveSettings({ port: msg.port });
-      connection.restart();
-      return { ok: true };
+    case 'popup:probe': {
+      if (connection.connected) return { vscode: true, incompatible: false } satisfies ProbeResult;
+      const outcome = await probeHub(HUB_URLS);
+      return { vscode: outcome === 'found', incompatible: outcome === 'incompatible' } satisfies ProbeResult;
+    }
     case 'popup:control':
       await control(msg.action);
       return { ok: true };
@@ -421,8 +438,12 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 // Without a listener here Chrome would not start the worker after an install/update/reload, and
 // the tutorial tab would stay orphaned until the user happened to open the popup.
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   void ready.then(syncConnection);
+  // A short welcome page on first install only (never on updates).
+  if (details.reason === chrome.runtime.OnInstalledReason.INSTALL) {
+    void chrome.tabs.create({ url: chrome.runtime.getURL('welcome.html') });
+  }
 });
 
 chrome.runtime.onStartup.addListener(() => {

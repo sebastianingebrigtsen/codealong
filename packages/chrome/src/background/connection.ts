@@ -46,15 +46,22 @@ export class HubConnection {
   private welcomed = false;
   private wanted = false;
   private attempts = 0;
+  /** Index into the candidate URLs; kept after a success so reconnects try the last good port first. */
+  private urlIndex = 0;
+  /** Candidate URLs tried in the current round without success. */
+  private triedThisRound = 0;
   private lastMessageAt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private handshakeTimer: ReturnType<typeof setTimeout> | null = null;
   private watchdogTimer: ReturnType<typeof setInterval> | null = null;
   state: ConnectionState = 'off';
   lastError: string | null = null;
+  /** The hub rejected us for speaking another protocol version (one extension needs an update). */
+  incompatible = false;
 
   constructor(
-    private readonly url: () => string,
+    /** Candidate hub URLs (one per port in HUB_PORTS), tried in turn. */
+    private readonly urls: () => readonly string[],
     private readonly events: ConnectionEvents,
     private readonly createSocket: (url: string) => SocketLike = (url) => new WebSocket(url) as SocketLike,
     private readonly now: () => number = () => Date.now(),
@@ -81,14 +88,6 @@ export class HubConnection {
     this.state = 'off';
   }
 
-  /** Reconnect immediately (e.g. after the port setting changed). */
-  restart(): void {
-    const wanted = this.wanted;
-    this.stop();
-    this.attempts = 0;
-    if (wanted) this.ensure();
-  }
-
   send(msg: BrowserToHub): boolean {
     if (!this.connected || !this.socket) return false;
     try {
@@ -100,9 +99,11 @@ export class HubConnection {
   }
 
   private connect(): void {
+    const urls = this.urls();
+    const url = urls[this.urlIndex % urls.length] ?? '';
     let socket: SocketLike;
     try {
-      socket = this.createSocket(this.url());
+      socket = this.createSocket(url);
     } catch (err) {
       this.lastError = String(err);
       this.state = 'error';
@@ -118,10 +119,7 @@ export class HubConnection {
       socket.send(
         JSON.stringify({ type: 'hello', protocol: PROTOCOL_VERSION, role: 'browser', client: 'chrome-extension' }),
       );
-      this.handshakeTimer = setTimeout(() => {
-        this.lastError = 'No answer from VS Code (is another program using the port?)';
-        socket.close();
-      }, HANDSHAKE_TIMEOUT_MS);
+      this.handshakeTimer = setTimeout(() => socket.close(), HANDSHAKE_TIMEOUT_MS);
     };
     socket.onmessage = (ev) => this.onMessage(socket, ev.data);
     socket.onerror = () => {
@@ -133,9 +131,27 @@ export class HubConnection {
       this.teardown(socket);
       if (wasConnected) this.events.log('CONNECTION_LOST');
       this.state = this.wanted ? 'error' : 'off';
-      if (!this.lastError || wasConnected) this.lastError = 'VS Code is not reachable';
+      if (!this.lastError || wasConnected) this.lastError = 'VS Code with CodeAlong is not running';
       this.events.onDisconnected(wasConnected);
-      if (this.wanted) this.scheduleReconnect();
+      if (!this.wanted) return;
+      if (wasConnected) {
+        this.triedThisRound = 0;
+        this.scheduleReconnect();
+        return;
+      }
+      // Not this port: try the next candidate right away, back off once all were tried.
+      this.triedThisRound++;
+      if (this.triedThisRound < this.urls().length) {
+        this.urlIndex++;
+        this.reconnectTimer = setTimeout(() => {
+          this.reconnectTimer = null;
+          if (this.wanted && !this.socket) this.connect();
+        }, 0);
+      } else {
+        this.triedThisRound = 0;
+        this.urlIndex++;
+        this.scheduleReconnect();
+      }
     };
   }
 
@@ -149,7 +165,9 @@ export class HubConnection {
       if (msg.type === 'welcome' && msg.protocol === PROTOCOL_VERSION) {
         this.welcomed = true;
         this.attempts = 0;
+        this.triedThisRound = 0;
         this.lastError = null;
+        this.incompatible = false;
         this.state = 'connected';
         if (this.handshakeTimer) clearTimeout(this.handshakeTimer);
         this.handshakeTimer = null;
@@ -163,6 +181,7 @@ export class HubConnection {
         this.events.onConnected();
       } else if (msg.type === 'error') {
         this.lastError = msg.message;
+        this.incompatible = msg.code === 'protocol-mismatch';
         socket.close();
       }
       return;

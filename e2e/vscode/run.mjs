@@ -20,8 +20,15 @@ try {
     vscodeExecutablePath: process.env.CODEALONG_VSCODE || undefined,
     extensionDevelopmentPath: join(root, 'packages/vscode'),
     extensionTestsPath: join(here, 'suite.cjs'),
-    launchArgs: ['--disable-extensions', '--user-data-dir', join(profile, 'data'), '--disable-workspace-trust', profile],
-    extensionTestsEnv: { CODEALONG_ROOT: root, CODEALONG_TMP: profile },
+    launchArgs: [
+      '--disable-extensions',
+      '--user-data-dir',
+      join(profile, 'data'),
+      '--disable-workspace-trust',
+      profile,
+    ],
+    // Test-only ports so a real CodeAlong running on this machine is never touched.
+    extensionTestsEnv: { CODEALONG_ROOT: root, CODEALONG_TMP: profile, CODEALONG_HUB_PORTS: '48395' },
   });
   console.log('VS Code extension e2e: passed');
 } catch (err) {

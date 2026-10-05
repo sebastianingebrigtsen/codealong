@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      development-dependencies:
+        dependency-type: development
+    # @types/vscode must match the minimum supported VS Code version (engines.vscode).
+    ignore:
+      - dependency-name: '@types/vscode'
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

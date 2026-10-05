@@ -16,23 +16,27 @@ const ICONS: Record<StatusPhase, string> = {
 };
 
 const TOOLTIPS: Partial<Record<StatusPhase, string>> = {
-  waitingForBrowser: 'Open a tutorial in Chrome and click "Follow this tab" in the CodeAlong extension.',
-  noTutorial: 'Chrome is connected. Choose a tutorial tab with "Follow this tab".',
-  noVideo: 'No playable video found in the tutorial tab yet.',
-  coding: 'Paused by CodeAlong while you code.',
-  waitingToResume: 'Paused by CodeAlong. Save, press the "done" hotkey or play the video to continue.',
-  pausedByUser: 'You paused the video. CodeAlong will not resume it automatically.',
-  codingWhilePlaying: 'You started the video while coding, so CodeAlong lets it play.',
+  waitingForBrowser:
+    'Not connected to Chrome yet. In Chrome, open a tutorial, click the CodeAlong toolbar icon and choose "Follow this tab".',
+  noTutorial: 'Connected to Chrome. Open a tutorial and choose "Follow this tab" in the CodeAlong toolbar icon.',
+  noVideo: 'Following a tab, but no video was found on it yet. Start the video in Chrome.',
+  playing: 'The tutorial is playing. Start typing and CodeAlong pauses it.',
+  coding: 'Paused by CodeAlong while you code. It continues when you stop typing or save.',
+  waitingToResume: 'Paused by CodeAlong. Save, use "I\'m Done", or press play to continue.',
+  pausedByUser: 'You paused the video, so CodeAlong will not start it again by itself.',
+  codingWhilePlaying: 'You pressed play while coding, so CodeAlong lets the video play.',
+  disabled: 'CodeAlong is turned off and will not pause or play anything.',
 };
 
 export class StatusBar implements vscode.Disposable {
-  private readonly item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  private readonly item = vscode.window.createStatusBarItem('codealong.status', vscode.StatusBarAlignment.Left, 100);
   private status: HubStatus | null = null;
   private role: NodeRole = 'starting';
   private error: string | null = null;
   private countdown: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
+    this.item.name = 'CodeAlong';
     this.item.command = 'codealong.showMenu';
     this.render();
     this.item.show();
@@ -56,7 +60,7 @@ export class StatusBar implements vscode.Disposable {
     const item = this.item;
     if (this.role === 'error') {
       item.text = '$(error) CodeAlong: Error';
-      item.tooltip = this.error ?? 'CodeAlong could not start its local hub.';
+      item.tooltip = `${this.error ?? 'CodeAlong could not start its local connection.'}\nClick for options.`;
       return;
     }
     if (!this.status) {
@@ -67,7 +71,7 @@ export class StatusBar implements vscode.Disposable {
     const s = this.status;
     item.text = `${ICONS[s.phase]} CodeAlong: ${describeStatus(s, Date.now())}`;
     const lines = [TOOLTIPS[s.phase] ?? '', s.tutorialTitle ? `Tutorial: ${s.tutorialTitle}` : ''];
-    if (this.role === 'follower') lines.push('(Hub runs in another VS Code window.)');
+    if (this.role === 'follower') lines.push('(Connected through another VS Code window.)');
     lines.push('Click for options.');
     item.tooltip = lines.filter(Boolean).join('\n');
   }

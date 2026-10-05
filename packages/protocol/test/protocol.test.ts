@@ -50,7 +50,13 @@ describe('parseEditorMessage / parseHubMessage', () => {
 });
 
 describe('describeStatus', () => {
-  const base: HubStatus = { phase: 'coding', enabled: true, browserConnected: true, tutorialTitle: null, resumeAt: null };
+  const base: HubStatus = {
+    phase: 'coding',
+    enabled: true,
+    browserConnected: true,
+    tutorialTitle: null,
+    resumeAt: null,
+  };
   it('shows a countdown only when a resume is close', () => {
     expect(describeStatus(base, 0)).toBe('Coding...');
     expect(describeStatus({ ...base, resumeAt: 10_000 }, 0)).toBe('Coding...');

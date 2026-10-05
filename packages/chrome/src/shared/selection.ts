@@ -25,7 +25,10 @@ export function chooseCandidate<T>(candidates: readonly Candidate<T>[], current:
   if (cur) {
     const challenger = playing.find((c) => c.key !== cur.key);
     const takeover =
-      !cur.playing && challenger !== undefined && challenger.area >= MIN_AREA && challenger.area >= cur.area * TAKEOVER_RATIO;
+      !cur.playing &&
+      challenger !== undefined &&
+      challenger.area >= MIN_AREA &&
+      challenger.area >= cur.area * TAKEOVER_RATIO;
     return takeover ? challenger.key : cur.key;
   }
 
