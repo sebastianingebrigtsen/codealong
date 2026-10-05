@@ -42,8 +42,7 @@ export const DEV_CHROME_EXTENSION_ID = 'golihbblpnhanlhgnnngcfhmolomajoo';
  * own ID on the first upload). Must be filled in before the first public release; the release
  * script refuses to package without it. See docs/RELEASING.md.
  */
-export const STORE_CHROME_EXTENSION_ID: string | null = null;
-
+export const STORE_CHROME_EXTENSION_ID: string | null = 'jhfmljdjpeaclncddhhifegcknjgfjij';
 /** Chrome extensions allowed to connect to the hub. */
 export const ALLOWED_CHROME_EXTENSION_IDS: readonly string[] = [
   DEV_CHROME_EXTENSION_ID,

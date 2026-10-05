@@ -3,7 +3,7 @@
   "displayName": "CodeAlong",
   "description": "Coding tutorials that wait for you. Pauses the video in Chrome while you type and continues when you're done.",
   "version": "0.1.0",
-  "publisher": "sebastianingebrigtsen",
+  "publisher": "SebastianIngebrigtsen",
   "private": true,
   "license": "MIT",
   "author": "Sebastian Westin Ingebrigtsen",
