@@ -18,7 +18,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Pinned images: a runner image upgrade should be a deliberate change, not a surprise.
+        os: [ubuntu-24.04, windows-2025, macos-15]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -36,7 +37,7 @@ jobs:
 
   e2e-chrome:
     name: Chrome extension in Chromium
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -48,8 +49,17 @@ jobs:
       - run: npm run test:e2e
 
   e2e-vscode:
-    name: VS Code extension in VS Code
-    runs-on: ubuntu-latest
+    # Pinned VS Code versions (e2e/vscode/versions.mjs): the oldest supported (= engines.vscode)
+    # and the newest tested. New stable releases are covered by vscode-compat.yml, which never
+    # blocks pull requests.
+    name: VS Code extension in VS Code (${{ matrix.vscode }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        vscode: [minimum, latest-tested]
+    env:
+      CODEALONG_VSCODE_VERSION: ${{ matrix.vscode }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -57,4 +67,18 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: xvfb-run -a npm run test:vscode
+      - name: Cache VS Code download
+        uses: actions/cache@v4
+        with:
+          path: .vscode-test
+          key: vscode-${{ runner.os }}-${{ matrix.vscode }}-${{ hashFiles('e2e/vscode/versions.mjs') }}
+      - run: npm run build
+      - name: Run tests (virtual display)
+        run: xvfb-run -a --server-args="-screen 0 1920x1080x24" node e2e/vscode/run.mjs
+      - name: Upload VS Code logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-e2e-${{ matrix.vscode }}
+          path: e2e/.artifacts/
+          retention-days: 14

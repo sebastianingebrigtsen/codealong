@@ -32,7 +32,10 @@ Nothing is published automatically. Pushing a `v*` tag only builds the artifacts
 
 ## Every release
 
-1. Make sure `main` is green in CI.
+1. Make sure `main` is green in CI, and run the _VS Code compatibility_ workflow (Actions → Run
+   workflow) against `stable`. If it passes on a newer VS Code than `LATEST_TESTED` in
+   `e2e/vscode/versions.mjs`, bump `LATEST_TESTED`. Raising the minimum VS Code version means changing
+   `MINIMUM`, `engines.vscode` and `@types/vscode` together (a test enforces this).
 2. Set the version and update the changelog:
    ```bash
    npm run version:set -- 0.2.0

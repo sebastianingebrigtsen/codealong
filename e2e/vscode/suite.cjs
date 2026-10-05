@@ -1,4 +1,12 @@
-/* Runs inside the VS Code extension host. Plain CommonJS on purpose (no build step). */
+/* Runs inside the VS Code extension host. Plain CommonJS on purpose (no build step).
+ *
+ * Design rule: no assertion may depend on how fast this machine is. Every edit goes through the
+ * VS Code renderer, which can stall for seconds on a small headless CI machine. So:
+ *  - checks that must not see an automatic resume use a long idle delay (LONG_IDLE_S);
+ *  - the idle-resume check uses a short delay and asserts a lower bound (never early) as well as
+ *    eventually resuming;
+ *  - waits are generous (waiting longer never makes a check weaker).
+ */
 const vscode = require('vscode');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -6,14 +14,18 @@ const WsClient = require(path.join(process.env.CODEALONG_ROOT, 'node_modules/ws'
 
 const PORT = 48395; // matches CODEALONG_HUB_PORTS in run.mjs
 const ORIGIN = 'chrome-extension://golihbblpnhanlhgnnngcfhmolomajoo';
+const WAIT_MS = 30_000;
+const LONG_IDLE_S = 60;
+const SHORT_IDLE_S = 2;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function waitFor(cond, what, ms = 8000) {
+async function waitFor(cond, what, ms = WAIT_MS) {
   const start = Date.now();
   while (!cond()) {
-    if (Date.now() - start > ms) throw new Error(`timed out waiting for: ${what}`);
+    if (Date.now() - start > ms) throw new Error(`timed out after ${ms} ms waiting for: ${what}`);
     await sleep(25);
   }
+  return Date.now() - start;
 }
 
 /** A fake Chrome extension: reports a video and obeys commands like the real VideoController. */
@@ -31,7 +43,7 @@ function fakeBrowser() {
     } else if (msg.type === 'ping') {
       ws.send('{"type":"pong"}');
     } else if (msg.type === 'command') {
-      commands.push(msg);
+      commands.push({ ...msg, at: Date.now() });
       if (msg.command === 'pause' && video.status === 'playing') {
         Object.assign(video, { status: 'paused', owner: 'codealong', pauseId: msg.pauseId });
         report('codealong-pause');
@@ -54,6 +66,8 @@ function fakeBrowser() {
     ws,
     commands,
     video,
+    count: (command) => commands.filter((c) => c.command === command).length,
+    last: (command) => commands.filter((c) => c.command === command).at(-1),
     opened: new Promise((r, j) => {
       ws.on('open', r);
       ws.on('error', j);
@@ -63,14 +77,32 @@ function fakeBrowser() {
 
 exports.run = async function run() {
   const results = [];
+  const save = () => fs.writeFileSync(process.env.CODEALONG_E2E_RESULTS, results.join('\n'));
   const check = (name, ok, extra = '') => {
     results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${extra ? ` (${extra})` : ''}`);
-    if (!ok) throw new Error(`${name} ${extra}\n${results.join('\n')}`);
+    save();
+    if (!ok) throw new Error(`${name} ${extra}`);
   };
+  const step = async (name, fn) => {
+    try {
+      const extra = await fn();
+      check(name, true, extra ?? '');
+    } catch (err) {
+      if (!results.at(-1)?.startsWith(`FAIL ${name}`)) check(name, false, err.message);
+      throw err;
+    }
+  };
+
+  results.push(`INFO VS Code ${vscode.version}, ${process.platform}`);
+  save();
 
   const cfg = vscode.workspace.getConfiguration('codealong');
   const G = vscode.ConfigurationTarget.Global;
-  await cfg.update('idleDelaySeconds', 1, G);
+  const setIdle = async (seconds) => {
+    await cfg.update('idleDelaySeconds', seconds, G);
+    await sleep(300); // let the extension's configuration listener apply it
+  };
+  await setIdle(LONG_IDLE_S);
   await cfg.update('debugLogging', true, G);
 
   const manifest = JSON.parse(
@@ -78,109 +110,139 @@ exports.run = async function run() {
   );
   const ext = vscode.extensions.getExtension(`${manifest.publisher}.${manifest.name}`);
   check('extension found', !!ext);
-  await ext.activate();
-  const commandIds = await vscode.commands.getCommands(true);
-  check(
-    'commands registered',
-    [
-      'codealong.togglePlayback',
-      'codealong.done',
-      'codealong.toggleEnabled',
-      'codealong.showMenu',
-      'codealong.openWalkthrough',
-      'codealong.getChromeExtension',
-    ].every((c) => commandIds.includes(c)),
-  );
+  await step('extension activates', () => ext.activate());
 
-  await vscode.commands.executeCommand('codealong.openWalkthrough');
-  results.push('PASS walkthrough opens');
+  await step('commands registered', async () => {
+    const ids = await vscode.commands.getCommands(true);
+    const missing = manifest.contributes.commands.map((c) => c.command).filter((c) => !ids.includes(c));
+    if (missing.length) throw new Error(`missing: ${missing.join(', ')}`);
+  });
 
-  // The hub comes up on the test port.
+  await step('walkthrough opens', () => vscode.commands.executeCommand('codealong.openWalkthrough'));
+
   let browser;
-  for (let i = 0; i < 40 && !browser; i++) {
-    const b = fakeBrowser();
-    try {
-      await b.opened;
-      browser = b;
-    } catch {
-      await sleep(250);
+  await step('hub accepts the Chrome extension', async () => {
+    const start = Date.now();
+    while (!browser && Date.now() - start < WAIT_MS) {
+      const b = fakeBrowser();
+      try {
+        await b.opened;
+        browser = b;
+      } catch {
+        await sleep(250);
+      }
     }
-  }
-  check('hub accepts the Chrome extension', !!browser);
-  await sleep(300);
+    if (!browser) throw new Error('no connection');
+    await waitFor(() => browser.commands.length === 0 && browser.ws.readyState === 1, 'connection ready');
+  });
 
   const file = path.join(process.env.CODEALONG_TMP, 'app.js');
   fs.writeFileSync(file, '// tutorial code\n');
   const doc = await vscode.workspace.openTextDocument(file);
-  const editor = await vscode.window.showTextDocument(doc);
+  let editor = await vscode.window.showTextDocument(doc);
+  const type = async (text) => {
+    editor = await vscode.window.showTextDocument(doc);
+    await editor.edit((b) => b.insert(new vscode.Position(0, 0), text));
+  };
 
+  // CodeAlong deliberately ignores edits in a window without OS focus. Give the window manager a
+  // moment, then either run the typing checks or (locally only) report why they could not run.
+  await waitFor(() => vscode.window.state.focused, 'window focus', 5_000).catch(() => undefined);
   const focused = vscode.window.state.focused;
   results.push(`INFO window focused: ${focused}`);
+  if (!focused && process.env.CODEALONG_E2E_REQUIRE_FOCUS) {
+    check('window has OS focus (required in CI)', false);
+  }
+
   if (focused) {
-    await editor.edit((b) => b.insert(new vscode.Position(1, 0), 'const answer = 42;\n'));
-    await waitFor(() => browser.commands.some((c) => c.command === 'pause'), 'pause after typing');
-    check('typing pauses the tutorial', true);
-    await editor.edit((b) => b.insert(new vscode.Position(2, 0), 'console.log(answer);\n'));
-    await sleep(300);
-    check('no duplicate pause while typing', browser.commands.filter((c) => c.command === 'pause').length === 1);
-    await waitFor(() => browser.commands.some((c) => c.command === 'resume'), 'resume after idle', 5000);
-    const resume = browser.commands.find((c) => c.command === 'resume');
-    check('idle resumes with rewind', resume.rewindSeconds === 2, `rewind=${resume.rewindSeconds}`);
+    // Long idle delay: whatever the machine's speed, nothing may resume during these checks.
+    await step('typing pauses the tutorial', async () => {
+      await type('const answer = 42;\n');
+      return `${await waitFor(() => browser.count('pause') === 1, 'pause after typing')} ms`;
+    });
+    await step('more typing does not pause again', async () => {
+      for (const line of ['let a = 1;\n', 'let b = 2;\n', 'let c = 3;\n']) await type(line);
+      await sleep(500);
+      if (browser.count('pause') !== 1 || browser.count('resume') !== 0) {
+        throw new Error(`pauses=${browser.count('pause')} resumes=${browser.count('resume')}`);
+      }
+    });
+    await step('"I\'m done" resumes with rewind', async () => {
+      await vscode.commands.executeCommand('codealong.done');
+      await waitFor(() => browser.count('resume') === 1, 'resume after done');
+      const r = browser.last('resume');
+      if (r.rewindSeconds !== 2) throw new Error(`rewind=${r.rewindSeconds}`);
+    });
+
+    // Short idle delay: resumes on its own, but never before the delay has passed.
+    await step('idle resumes, not before the idle delay', async () => {
+      await setIdle(SHORT_IDLE_S);
+      await type('// idle test\n'); // a single edit: it both pauses and starts the idle timer
+      await waitFor(() => browser.count('pause') === 2, 'pause before idle');
+      await waitFor(() => browser.count('resume') === 2, 'resume after idle');
+      const r = browser.last('resume');
+      // The pause command is sent in the same instant the idle timer starts, so measuring from
+      // its arrival is independent of how slow the editor was. 100 ms slack for timer granularity.
+      const waited = r.at - browser.last('pause').at;
+      if (waited < SHORT_IDLE_S * 1000 - 100) throw new Error(`resumed after only ${waited} ms`);
+      if (r.rewindSeconds !== 2) throw new Error(`rewind=${r.rewindSeconds}`);
+      return `${waited} ms after the pause`;
+    });
+
+    // Long idle again: a save is the only thing that can resume within the wait below.
+    await step('manual save resumes', async () => {
+      await setIdle(LONG_IDLE_S);
+      await type('// save test\n');
+      await waitFor(() => browser.count('pause') === 3, 'pause before save');
+      const savedAt = Date.now();
+      await vscode.commands.executeCommand('workbench.action.files.save');
+      await waitFor(() => browser.count('resume') === 3, 'resume after save', (LONG_IDLE_S / 2) * 1000);
+      return `${Date.now() - savedAt} ms`;
+    });
   } else {
     results.push(
-      'SKIP typing tests: the test window did not get OS focus (CodeAlong ignores edits in unfocused windows by design)',
+      'SKIP typing checks: the test window has no OS focus (edits in unfocused windows are ignored by design)',
     );
+    save();
   }
 
-  // Edits in a non-active document never count.
-  const before = browser.commands.length;
-  const other = await vscode.workspace.openTextDocument({ content: 'x', language: 'plaintext' });
-  const wsEdit = new vscode.WorkspaceEdit();
-  wsEdit.insert(other.uri, new vscode.Position(0, 0), 'background change ');
-  await vscode.workspace.applyEdit(wsEdit);
-  await sleep(300);
-  check('background edits are ignored', browser.commands.length === before);
+  await step('edits outside the active editor are ignored', async () => {
+    const before = browser.commands.length;
+    const other = await vscode.workspace.openTextDocument({ content: 'x', language: 'plaintext' });
+    const wsEdit = new vscode.WorkspaceEdit();
+    wsEdit.insert(other.uri, new vscode.Position(0, 0), 'background change ');
+    await vscode.workspace.applyEdit(wsEdit);
+    await sleep(500);
+    if (browser.commands.length !== before) throw new Error('a background edit sent a command');
+  });
 
-  await vscode.commands.executeCommand('codealong.togglePlayback');
-  await waitFor(() => browser.commands.some((c) => c.command === 'userToggle'), 'toggle command');
-  check('toggle hotkey command reaches the browser', true);
-  await waitFor(() => browser.video.owner === 'user', 'user pause recorded');
-  await editor.edit((b) => b.insert(new vscode.Position(0, 0), '// more\n'));
-  await sleep(1800);
-  check('user pause is never resumed', !browser.commands.some((c, i) => i > before && c.command === 'resume'));
+  await step('toggle shortcut pauses as a user action', async () => {
+    await vscode.commands.executeCommand('codealong.togglePlayback');
+    await waitFor(() => browser.video.owner === 'user', 'user pause recorded');
+  });
 
-  // Manual save = "done": resumes ~1 s after the save, long before the (now 10 s) idle delay.
-  if (focused) {
-    await cfg.update('idleDelaySeconds', 10, G);
-    await vscode.commands.executeCommand('codealong.togglePlayback'); // user plays again
-    await waitFor(() => browser.video.status === 'playing', 'playing again');
-    await vscode.window.showTextDocument(doc);
-    const pausesBefore = browser.commands.filter((c) => c.command === 'pause').length;
-    await editor.edit((b) => b.insert(new vscode.Position(0, 0), '// save test\n'));
-    await waitFor(
-      () => browser.commands.filter((c) => c.command === 'pause').length > pausesBefore,
-      'pause before save',
-    );
-    const resumesBefore = browser.commands.filter((c) => c.command === 'resume').length;
-    const savedAt = Date.now();
+  await step('a user pause is never resumed', async () => {
+    await setIdle(SHORT_IDLE_S);
+    const resumes = browser.count('resume');
+    if (focused) await type('// typing while paused by the user\n');
     await vscode.commands.executeCommand('workbench.action.files.save');
-    await waitFor(
-      () => browser.commands.filter((c) => c.command === 'resume').length > resumesBefore,
-      'resume after save',
-      5000,
-    );
-    check('manual save resumes', Date.now() - savedAt < 4000, `${Date.now() - savedAt} ms`);
-  }
+    await sleep(SHORT_IDLE_S * 1000 * 3);
+    if (browser.count('resume') !== resumes || browser.video.status !== 'paused') {
+      throw new Error('CodeAlong resumed a video the user paused');
+    }
+  });
 
-  await cfg.update('enabled', false, G);
-  await sleep(200);
-  results.push('PASS settings change applied without restart');
+  await step('turning CodeAlong off applies immediately', async () => {
+    await cfg.update('enabled', false, G);
+    await sleep(300);
+    await vscode.commands.executeCommand('codealong.togglePlayback'); // user plays
+    await waitFor(() => browser.video.status === 'playing', 'playing');
+    const pauses = browser.count('pause');
+    if (focused) await type('// typing while disabled\n');
+    await sleep(500);
+    if (browser.count('pause') !== pauses) throw new Error('paused while disabled');
+  });
 
   browser.ws.close();
-  fs.writeFileSync(
-    (fs.mkdirSync(path.join(process.env.CODEALONG_ROOT, 'e2e/.artifacts'), { recursive: true }),
-    path.join(process.env.CODEALONG_ROOT, 'e2e/.artifacts/vscode-result.txt')),
-    results.join('\n'),
-  );
-  console.log(results.join('\n'));
+  save();
 };

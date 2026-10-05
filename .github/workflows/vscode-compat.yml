@@ -1,0 +1,52 @@
+name: VS Code compatibility
+
+# Tests the extension against the newest VS Code (`stable`, a moving target) on every OS.
+# Runs weekly and on demand; it never blocks pull requests. When it is green, bump
+# LATEST_TESTED in e2e/vscode/versions.mjs to the version it reports. When it is red, a new
+# VS Code release changed something: investigate before users hit it.
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      vscode:
+        description: 'VS Code version (stable, insiders, minimum, latest-tested or x.y.z)'
+        default: stable
+
+permissions:
+  contents: read
+
+jobs:
+  vscode:
+    name: VS Code ${{ inputs.vscode || 'stable' }} on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
+    env:
+      CODEALONG_VSCODE_VERSION: ${{ inputs.vscode || 'stable' }}
+      # Hosted Windows/macOS runners don't reliably give the test window OS focus; there the
+      # typing checks may be reported as skipped. Linux (Xvfb) requires focus.
+      CODEALONG_E2E_REQUIRE_FOCUS: ${{ startsWith(matrix.os, 'ubuntu') && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Run tests (Linux, virtual display)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a --server-args="-screen 0 1920x1080x24" node e2e/vscode/run.mjs
+      - name: Run tests
+        if: runner.os != 'Linux'
+        run: node e2e/vscode/run.mjs
+      - name: Upload VS Code logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-compat-${{ matrix.os }}
+          path: e2e/.artifacts/
+          retention-days: 14
