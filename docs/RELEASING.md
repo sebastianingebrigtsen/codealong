@@ -22,13 +22,13 @@ Nothing is published automatically. Pushing a `v*` tag only builds the artifacts
    5. Fill in the listing and privacy tab from [store/chrome-web-store.md](store/chrome-web-store.md).
 2. **VS Code Marketplace**
    1. Create a publisher at https://marketplace.visualstudio.com/manage (sign in with a Microsoft
-      account). Use the ID `sebastianingebrigtsen`, or change `publisher` in
-      `packages/vscode/package.json` to the one you create.
+      account). The current publisher ID is `SebastianIngebrigtsen`, matching
+      `packages/vscode/package.json`.
    2. To publish from the command line, create an Azure DevOps personal access token with the
       _Marketplace → Manage_ scope ([guide](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#get-a-personal-access-token)).
       Uploading the `.vsix` in the web UI works too.
-3. After both listings exist, replace the `TODO(release)` placeholders in `README.md` and set
-   `VSCODE_EXTENSION_URL` in `packages/chrome/src/shared/links.ts` to the Marketplace URL.
+3. As each store listing becomes available, replace its corresponding `TODO(release)` placeholder
+   in `README.md` and update the relevant store URL in the extension.
 
 ## Every release
 

@@ -80,7 +80,11 @@ currently typing in the CodeAlong VS Code extension.
 ## Notes for reviewers (Test instructions field)
 
 ```
-CodeAlong needs its companion VS Code extension ("CodeAlong" by <publisher> on the Visual Studio Marketplace) running on the same computer; the two communicate over ws://127.0.0.1:47390.
+CodeAlong needs its companion VS Code extension ("CodeAlong" by SebastianIngebrigtsen) running on the same computer. Install it from:
+
+https://marketplace.visualstudio.com/items?itemName=SebastianIngebrigtsen.codealong
+
+The two extensions communicate locally over ws://127.0.0.1:47390.
 To test: install the VS Code extension, open https://www.youtube.com/watch?v=rfscVS0vtbw, click the CodeAlong icon → "Follow this tab", play the video, then type in any file in VS Code. The video pauses; stop typing for 5 seconds and it rewinds 2 s and resumes.
 Without VS Code the popup explains that VS Code was not found; no other functionality is affected.
 ```
