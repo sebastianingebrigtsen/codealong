@@ -1,0 +1,41 @@
+{
+  "name": "codealong",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Auto-pause and resume coding tutorials in Chrome based on your activity in VS Code.",
+  "workspaces": [
+    "packages/protocol",
+    "packages/vscode",
+    "packages/chrome"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc -p packages/protocol --noEmit && tsc -p packages/vscode --noEmit && tsc -p packages/chrome --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "npm run build && vitest run --config e2e/vitest.config.ts",
+    "package:vscode": "npm run build && cd packages/vscode && vsce package --no-dependencies --allow-missing-repository --skip-license -o ../../dist/codealong-vscode.vsix",
+    "check": "npm run typecheck && npm run lint && npm test && npm run build",
+    "test:vscode": "npm run build && node e2e/vscode/run.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/chrome": "^0.3.4",
+    "@types/node": "^24.0.0",
+    "@types/vscode": "~1.95.0",
+    "@types/ws": "^8.18.2",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.11.0",
+    "globals": "^17.13.0",
+    "playwright": "^1.63.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.0",
+    "vite": "^8.0.0",
+    "vitest": "^5.0.3"
+  },
+  "type": "module"
+}

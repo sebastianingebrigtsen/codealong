@@ -1,0 +1,9 @@
+{
+  "name": "@codealong/chrome",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@codealong/protocol": "0.1.0"
+  }
+}

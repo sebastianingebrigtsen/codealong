@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>CodeAlong</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <h1>CodeAlong</h1>
+      <label class="switch" title="Turn CodeAlong on/off in Chrome">
+        <input type="checkbox" id="enabled" />
+        <span>On</span>
+      </label>
+    </header>
+
+    <section class="rows">
+      <div class="row"><span class="label">VS Code</span><span id="connection" class="value">–</span></div>
+      <div class="row"><span class="label">Tutorial</span><span id="tutorial" class="value">None</span></div>
+      <div class="row"><span class="label">Video</span><span id="video" class="value">–</span></div>
+      <div class="row"><span class="label">Status</span><span id="phase" class="value">–</span></div>
+    </section>
+
+    <p id="error" class="error" hidden></p>
+
+    <section class="actions">
+      <button id="follow" class="primary">Follow this tab</button>
+      <div class="controls">
+        <button id="toggle" title="Pause/resume the tutorial (Alt+Shift+P)">Pause / Play</button>
+        <button id="done" title="I'm done – continue the tutorial (Alt+Shift+D)">I'm done</button>
+      </div>
+    </section>
+
+    <details>
+      <summary>Advanced</summary>
+      <label class="field">Port <input type="number" id="port" min="1024" max="65535" /></label>
+      <label class="field"><input type="checkbox" id="debug" /> Debug logging</label>
+      <ol id="log" class="log"></ol>
+    </details>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,63 @@
+:root {
+  --bg: #ffffff;
+  --fg: #111827;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --accent: #2563eb;
+  --accent-fg: #ffffff;
+  --error: #b91c1c;
+  --ok: #15803d;
+  --warn: #b45309;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #18181b;
+    --fg: #f4f4f5;
+    --muted: #a1a1aa;
+    --border: #3f3f46;
+    --accent: #3b82f6;
+    --error: #f87171;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  width: 320px;
+  padding: 14px;
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+}
+header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+h1 { font-size: 15px; margin: 0; }
+.switch { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+.rows { border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; }
+.row { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; }
+.row + .row { border-top: 1px solid var(--border); }
+.label { color: var(--muted); flex: none; }
+.value { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.value.ok { color: var(--ok); }
+.value.warn { color: var(--warn); }
+.value.bad { color: var(--error); }
+.error { color: var(--error); margin: 8px 0 0; }
+.actions { margin-top: 12px; display: grid; gap: 8px; }
+.controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+button {
+  font: inherit;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+button:disabled { opacity: 0.5; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+details { margin-top: 12px; color: var(--muted); }
+summary { cursor: pointer; }
+.field { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--fg); }
+.field input[type="number"] { width: 90px; font: inherit; padding: 3px 6px; background: transparent; color: var(--fg); border: 1px solid var(--border); border-radius: 4px; }
+.log { margin: 8px 0 0; padding-left: 0; list-style: none; font: 11px/1.5 ui-monospace, Menlo, monospace; max-height: 160px; overflow: auto; }

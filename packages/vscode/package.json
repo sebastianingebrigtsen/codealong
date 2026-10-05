@@ -1,0 +1,148 @@
+{
+  "name": "codealong",
+  "displayName": "CodeAlong",
+  "description": "Pauses your coding tutorial in Chrome while you type, and resumes it when you are done.",
+  "version": "0.1.0",
+  "publisher": "codealong",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Education",
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "extensionKind": [
+    "ui"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "codealong.togglePlayback",
+        "title": "Pause / Resume Tutorial",
+        "category": "CodeAlong"
+      },
+      {
+        "command": "codealong.done",
+        "title": "I'm Done – Continue Tutorial",
+        "category": "CodeAlong"
+      },
+      {
+        "command": "codealong.toggleEnabled",
+        "title": "Turn On/Off",
+        "category": "CodeAlong"
+      },
+      {
+        "command": "codealong.showLog",
+        "title": "Show Log",
+        "category": "CodeAlong"
+      },
+      {
+        "command": "codealong.showMenu",
+        "title": "Show Menu",
+        "category": "CodeAlong"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "codealong.togglePlayback",
+        "key": "ctrl+alt+p"
+      },
+      {
+        "command": "codealong.done",
+        "key": "ctrl+alt+d"
+      }
+    ],
+    "configuration": {
+      "title": "CodeAlong",
+      "properties": {
+        "codealong.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "Let CodeAlong pause and resume the tutorial automatically."
+        },
+        "codealong.pauseOnTyping": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "Pause the tutorial when you start editing code."
+        },
+        "codealong.resumeAfterIdle": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "Resume the tutorial when you have stopped typing for `#codealong.idleDelaySeconds#` seconds."
+        },
+        "codealong.idleDelaySeconds": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 600,
+          "scope": "application",
+          "description": "Seconds without typing before you are considered done."
+        },
+        "codealong.resumeOnSave": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "Treat a manual save (Cmd/Ctrl+S) as \"done\" and resume about a second later, unless you keep typing. Auto-save is ignored."
+        },
+        "codealong.resumeOnTutorialFocus": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "description": "Resume when you switch back to the tutorial tab in Chrome. Handy on a single screen; with several screens it may resume when you only click the browser."
+        },
+        "codealong.rewindBeforeResume": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "Rewind a little before an automatic resume, so you hear the end of what the instructor said."
+        },
+        "codealong.rewindSeconds": {
+          "type": "number",
+          "default": 2,
+          "minimum": 0,
+          "maximum": 60,
+          "scope": "application",
+          "description": "How many seconds to rewind before an automatic resume."
+        },
+        "codealong.debug": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "description": "Write every CodeAlong event to the \"CodeAlong\" output channel. Source code is never logged."
+        },
+        "codealong.port": {
+          "type": "number",
+          "default": 47390,
+          "minimum": 1024,
+          "maximum": 65535,
+          "scope": "application",
+          "description": "Local port (127.0.0.1 only) used to talk to the Chrome extension. Must match the port in the Chrome extension."
+        },
+        "codealong.allowedChromeExtensionIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "golihbblpnhanlhgnnngcfhmolomajoo"
+          ],
+          "scope": "application",
+          "description": "Chrome extension IDs allowed to connect. The default is the ID of the CodeAlong extension in this repository."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@codealong/protocol": "0.1.0",
+    "ws": "^8.22.0"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "CodeAlong",
+  "version": "0.1.0",
+  "description": "Pauses your coding tutorial while you type in VS Code and resumes it when you are done.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwSCfb5sLpsWJCx8Upgm2HP7Pc/R5hMv9UZXMPSJza+HlXN80wRVNqluJIna1myvLUpNcef9npUdUkoKS9wIYVu7NY0m74xI60m+QMGVk70HWugfLx1vRF+r6SgcoLrrDEnp6vlJsJ7i/j+3BGZWhzTXttIzvmmOtVFVAVzzoRZHe4YWQVpPXleDWYeCrPCNc6dzJ2DYtDOVaQxwxdb2Fs50kyEuI3MOk9lbGX4TQIe/VUqfDlqDIFCOo87FtPcNeiP2woJoIFgXpSaktX0Z3EO5HgK2gKNkszI0El/6SeRJ5aonGC84hD5ZMQ5NzjR+dVpswqdB5uB3o7jJKQrxL4QIDAQAB",
+  "minimum_chrome_version": "116",
+  "permissions": ["storage", "scripting", "activeTab", "alarms"],
+  "host_permissions": [
+    "https://*.youtube.com/*",
+    "https://*.youtube-nocookie.com/*",
+    "https://vimeo.com/*",
+    "https://*.vimeo.com/*",
+    "https://laracasts.com/*",
+    "https://*.laracasts.com/*"
+  ],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.youtube.com/*",
+        "https://*.youtube-nocookie.com/*",
+        "https://vimeo.com/*",
+        "https://*.vimeo.com/*",
+        "https://laracasts.com/*",
+        "https://*.laracasts.com/*"
+      ],
+      "js": ["content.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "CodeAlong",
+    "default_icon": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" }
+  },
+  "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "commands": {
+    "toggle-playback": {
+      "suggested_key": { "default": "Alt+Shift+P" },
+      "description": "Pause / resume the tutorial"
+    },
+    "done": {
+      "suggested_key": { "default": "Alt+Shift+D" },
+      "description": "I'm done – continue the tutorial"
+    }
+  }
+}
