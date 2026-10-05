@@ -35,12 +35,12 @@ on the keyboard.
 CodeAlong has two small parts that work together: one for Chrome (controls the video) and one for
 VS Code (notices that you are coding). Install both:
 
-|             |                                                                                                       |
-| ----------- | ----------------------------------------------------------------------------------------------------- |
-| **Chrome**  | Chrome Web Store: _coming soon_ <!-- TODO(release): link the Chrome Web Store listing -->             |
-| **VS Code** | Visual Studio Marketplace: _coming soon_ <!-- TODO(release): link the VS Code Marketplace listing --> |
+|             |                                                                                                                  |
+| ----------- | ---------------------------------------------------------------------------------------------------------------- |
+| **Chrome**  | Chrome Web Store: _coming soon_ <!-- TODO(release): link the Chrome Web Store listing -->                        |
+| **VS Code** | [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=SebastianIngebrigtsen.codealong) |
 
-Until the store listings are live, you can [build and load both from source](#building-from-source).
+Until the Chrome Web Store listing is live, you can [build the Chrome extension from source](#building-from-source).
 
 ## Getting started
 
@@ -162,7 +162,7 @@ npm run dev        # builds both extensions and rebuilds on change
 
 CodeAlong is in early development (0.x). Under consideration, not promised:
 
-- Listings in the Chrome Web Store and the VS Code Marketplace
+- Chrome Web Store release
 - Verified support for more video sites and Chromium-based browsers
 - Only counting typing inside the tutorial's project folder
 
