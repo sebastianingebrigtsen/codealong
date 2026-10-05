@@ -40,20 +40,25 @@ every change must keep.
 
 ## Checks
 
-| Command                             | What it does                                                                                               |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `npm run check`                     | Formatting check, lint, typecheck, unit + integration tests, build                                         |
-| `npm test`                          | Unit and integration tests (Vitest, a few seconds)                                                         |
-| `npm run format`                    | Format everything with Prettier                                                                            |
-| `npm run test:e2e`                  | Chrome extension in real Chromium. First run: `npx playwright install chromium`                            |
-| `npm run test:vscode`               | VS Code extension in a downloaded VS Code (or set `CODEALONG_VSCODE` to an installed VS Code's executable) |
-| `npm run package -- --allow-dev-id` | Builds `dist/codealong-chrome-<v>.zip` and `dist/codealong-vscode-<v>.vsix`                                |
-| `npm run assets`                    | Re-renders icons and store images from `assets/icon.svg` (needs Playwright's Chromium)                     |
+| Command                             | What it does                                                                                                                                                                                                                         |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `npm run check`                     | Formatting check, lint, typecheck, unit + integration tests, build                                                                                                                                                                   |
+| `npm test`                          | Unit and integration tests (Vitest, a few seconds)                                                                                                                                                                                   |
+| `npm run format`                    | Format everything with Prettier                                                                                                                                                                                                      |
+| `npm run test:e2e`                  | Chrome extension in real Chromium. First run: `npx playwright install chromium`                                                                                                                                                      |
+| `npm run test:vscode`               | VS Code extension in real VS Code (pinned "latest tested" version, downloaded once). `CODEALONG_VSCODE_VERSION=minimum` tests the oldest supported version, `stable` the newest; `CODEALONG_VSCODE=<path>` uses an installed VS Code |
+| `npm run package -- --allow-dev-id` | Builds `dist/codealong-chrome-<v>.zip` and `dist/codealong-vscode-<v>.vsix`                                                                                                                                                          |
+| `npm run assets`                    | Re-renders icons and store images from `assets/icon.svg` (needs Playwright's Chromium)                                                                                                                                               |
 
 The e2e tests use their own ports (`48390`+), so they don't interfere with a CodeAlong you use day
 to day.
 
-CI runs `check` and packaging on Linux, Windows and macOS, plus both e2e suites on Linux.
+CI runs `check` and packaging on Linux, Windows and macOS, the Chromium e2e suite, and the VS Code
+e2e suite against two pinned VS Code versions (see `e2e/vscode/versions.mjs`). A weekly workflow
+tests the newest VS Code on all three systems without blocking pull requests.
+
+The VS Code e2e suite must never depend on machine speed: use long idle delays where no automatic
+resume may happen, and assert lower bounds rather than tight timings.
 
 ## Guidelines
 

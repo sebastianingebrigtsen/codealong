@@ -96,7 +96,7 @@ All settings live in VS Code (_Settings_ → search for "CodeAlong"):
 |                       |                                                                                                                                                                          |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Browser**           | Google Chrome 116+                                                                                                                                                       |
-| **Editor**            | Visual Studio Code 1.95+                                                                                                                                                 |
+| **Editor**            | Visual Studio Code 1.95 or newer. Automatically tested on 1.95.3 (the minimum) and 1.140.0, plus a weekly check against the latest stable release.                       |
 | **Video sites**       | YouTube and Laracasts (verified). Any site with a standard HTML5 video player, including players in iframes (e.g. Vimeo embeds) and web components with open shadow DOM. |
 | **Operating systems** | macOS: verified by hand and in automated tests. Windows and Linux: unit and integration tests run in CI; not yet verified by hand.                                       |
 

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { HUB_PORTS } from '@codealong/protocol';
 import { isStaticallyCovered } from '../packages/chrome/src/background/hosts';
 import { checkVersions } from '../scripts/versions.mjs';
+import { LATEST_TESTED, MINIMUM } from '../e2e/vscode/versions.mjs';
 
 const root = join(__dirname, '..');
 const json = (p: string) => JSON.parse(readFileSync(join(root, p), 'utf8'));
@@ -48,5 +49,20 @@ describe('repository', () => {
     for (const [key, prop] of Object.entries(props)) {
       expect(prop.description ?? prop.markdownDescription, key).toBeTruthy();
     }
+  });
+
+  it('engines.vscode is exactly the minimum VS Code version that CI tests', () => {
+    const p = json('packages/vscode/package.json');
+    const [major, minor] = MINIMUM.split('.');
+    // "^1.95.0" = any 1.x from 1.95.0; the patch release tested (1.95.3) has the same API.
+    expect(p.engines.vscode).toBe(`^${major}.${minor}.0`);
+    // Typings must not be newer than the minimum, or new APIs could slip in unnoticed.
+    expect(json('package.json').devDependencies['@types/vscode']).toBe(`~${major}.${minor}.0`);
+    const newer = (a: string, b: string) => {
+      const [x, y] = [a, b].map((v) => v.split('.').map(Number));
+      for (let i = 0; i < 3; i++) if (x![i] !== y![i]) return x![i]! > y![i]!;
+      return false;
+    };
+    expect(newer(LATEST_TESTED, MINIMUM)).toBe(true);
   });
 });
