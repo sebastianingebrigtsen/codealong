@@ -30,7 +30,7 @@ jobs:
       # typing checks may be reported as skipped. Linux (Xvfb) requires focus.
       CODEALONG_E2E_REQUIRE_FOCUS: ${{ startsWith(matrix.os, 'ubuntu') && '1' || '0' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
         with:
           node-version: 22
