@@ -2,6 +2,8 @@
 
 Copy-paste material for the Chrome Web Store Developer Dashboard. Keep it in sync with the extension.
 
+Live listing: https://chromewebstore.google.com/detail/codealong/jhfmljdjpeaclncddhhifegcknjgfjij
+
 ## Store listing
 
 **Name:** CodeAlong
@@ -23,10 +25,14 @@ You're following a coding tutorial. The instructor starts typing, so you pause t
 • Start typing in VS Code → the tutorial pauses.
 • Stop typing for a few seconds, or save → it rewinds 2 seconds and continues.
 • Pause the video yourself → CodeAlong never starts it again on its own.
+• A small label on the video shows why it paused and counts down before it continues.
 • Works with two screens. No more clicking back and forth.
 
+YOUR PACE
+Open Settings in the popup to choose how long CodeAlong waits after you stop typing, whether saving continues the video, how far it rewinds, and whether switching back to the tab continues it. Changes apply in VS Code instantly.
+
 HOW TO USE
-1. Install this extension and "CodeAlong" for Visual Studio Code. Both are needed: this one controls the video, the VS Code one notices when you code.
+1. Install this extension and "CodeAlong" for Visual Studio Code (https://marketplace.visualstudio.com/items?itemName=SebastianIngebrigtsen.codealong). Both are needed: this one controls the video, the VS Code one notices when you code.
 2. Open a tutorial, click the CodeAlong icon and choose "Follow this tab".
 3. Code along.
 
@@ -40,12 +46,13 @@ Open source (MIT): https://github.com/sebastianingebrigtsen/codealong
 
 ## Graphics
 
-| Asset                    | File                                             | Required |
-| ------------------------ | ------------------------------------------------ | -------- |
-| Store icon 128×128       | `packages/chrome/static/icons/128.png`           | yes      |
-| Screenshot 1280×800      | `assets/store/chrome-screenshot-1280x800.png`    | yes (≥1) |
-| Small promo tile 440×280 | `assets/store/chrome-promo-small-440x280.png`    | yes      |
-| Marquee promo 1400×560   | `assets/store/chrome-promo-marquee-1400x560.png` | optional |
+| Asset                    | File                                                   | Required    |
+| ------------------------ | ------------------------------------------------------ | ----------- |
+| Store icon 128×128       | `packages/chrome/static/icons/128.png`                 | yes         |
+| Screenshot 1280×800      | `assets/store/chrome-screenshot-1280x800.png`          | yes (≥1)    |
+| Screenshot 2 1280×800    | `assets/store/chrome-screenshot-settings-1280x800.png` | recommended |
+| Small promo tile 440×280 | `assets/store/chrome-promo-small-440x280.png`          | yes         |
+| Marquee promo 1400×560   | `assets/store/chrome-promo-marquee-1400x560.png`       | optional    |
 
 Regenerate with `npm run build && npm run assets`.
 
@@ -59,7 +66,7 @@ currently typing in the CodeAlong VS Code extension.
 
 | Permission                                 | Justification                                                                                                                                                                            |
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `storage`                                  | Remembers whether CodeAlong is turned on and which tab the user chose to follow, so this survives browser and extension restarts.                                                        |
+| `storage`                                  | Stores the user's settings (timing, rewind, on/off) and which tab they chose to follow, locally, so they survive browser and extension restarts.                                         |
 | `scripting`                                | Injects the video controller into the tab the user explicitly chooses to follow ("Follow this tab"), including tabs that were already open before installation.                          |
 | `activeTab`                                | Lets the popup read the URL of the current tab when the user clicks the toolbar icon, so it can ask for access to just that site.                                                        |
 | `alarms`                                   | Wakes the service worker every 30 seconds while a tutorial is followed, so the local connection to VS Code recovers after Chrome suspends the worker.                                    |
@@ -75,7 +82,7 @@ currently typing in the CodeAlong VS Code extension.
   on the same computer (127.0.0.1) and never leave the device.
 - Certify: not sold to third parties; not used for unrelated purposes; not used for creditworthiness.
 
-**Privacy policy URL:** https://github.com/sebastianingebrigtsen/codealong/blob/main/docs/PRIVACY.md
+**Privacy policy URL:** https://sebastianingebrigtsen.github.io/codealong/PRIVACY.html
 
 ## Notes for reviewers (Test instructions field)
 

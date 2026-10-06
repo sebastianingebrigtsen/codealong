@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { describeStatus, type HubStatus, type StatusPhase } from '@codealong/protocol';
+import { describeSettings, describeStatus, type HubStatus, type StatusPhase } from '@codealong/protocol';
 import type { NodeRole } from './hub/hubNode';
 
 const ICONS: Record<StatusPhase, string> = {
@@ -25,7 +25,7 @@ const TOOLTIPS: Partial<Record<StatusPhase, string>> = {
   waitingToResume: 'Paused by CodeAlong. Save, use "I\'m Done", or press play to continue.',
   pausedByUser: 'You paused the video, so CodeAlong will not start it again by itself.',
   codingWhilePlaying: 'You pressed play while coding, so CodeAlong lets the video play.',
-  disabled: 'CodeAlong is turned off and will not pause or play anything.',
+  disabled: 'Automatic pausing is off. Shortcuts still work. Turn it back on here or in the Chrome popup.',
 };
 
 export class StatusBar implements vscode.Disposable {
@@ -71,6 +71,7 @@ export class StatusBar implements vscode.Disposable {
     const s = this.status;
     item.text = `${ICONS[s.phase]} CodeAlong: ${describeStatus(s, Date.now())}`;
     const lines = [TOOLTIPS[s.phase] ?? '', s.tutorialTitle ? `Tutorial: ${s.tutorialTitle}` : ''];
+    if (s.settings && s.browserConnected && s.phase !== 'disabled') lines.push(`${describeSettings(s.settings)}.`);
     if (this.role === 'follower') lines.push('(Connected through another VS Code window.)');
     lines.push('Click for options.');
     item.tooltip = lines.filter(Boolean).join('\n');

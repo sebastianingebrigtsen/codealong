@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DEV_CHROME_EXTENSION_ID } from '@codealong/protocol';
 import { createThrottle, isUserEdit } from '../src/activity';
-import { ALLOWED_ORIGINS, readSettings } from '../src/settings';
+import { ALLOWED_ORIGINS, LEGACY_SETTINGS, readSettings } from '../src/settings';
 import { loadOrCreateEditorToken } from '../src/hub/token';
 
 describe('isUserEdit', () => {
@@ -43,22 +43,18 @@ describe('readSettings', () => {
     get: <T>(key: string, def: T): T => (key in values ? (values[key] as T) : def),
   });
 
-  it('uses sensible defaults', () => {
-    const s = readSettings(cfg({}));
-    expect(s.core).toMatchObject({ enabled: true, pauseOnTyping: true, idleDelayMs: 5_000, rewindSeconds: 2 });
-    expect(s.debugLogging).toBe(false);
+  it('only keeps editor-side settings in VS Code; anything else is ignored', () => {
+    expect(readSettings(cfg({}))).toEqual({ debugLogging: false });
+    expect(readSettings(cfg({ debugLogging: true, idleDelaySeconds: 30 }))).toEqual({ debugLogging: true });
+    expect(readSettings(cfg({ debugLogging: 'yes' }))).toEqual({ debugLogging: false });
   });
 
-  it('clamps nonsense values and ignores wrong types', () => {
-    const s = readSettings(
-      cfg({ idleDelaySeconds: -3, rewindSeconds: 1e9, enabled: 'yes', resumeOnSave: null, debugLogging: 1 }),
-    );
-    expect(s.core.idleDelayMs).toBe(1_000);
-    expect(s.core.rewindSeconds).toBe(60);
-    expect(s.core.enabled).toBe(true);
-    expect(s.core.resumeOnSave).toBe(true);
-    expect(s.debugLogging).toBe(false);
-    expect(readSettings(cfg({ idleDelaySeconds: 'ten' })).core.idleDelayMs).toBe(5_000);
+  it('every 0.1.0 setting stays declared, marked as moved to Chrome', () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
+    const props = manifest.contributes.configuration.properties;
+    for (const key of LEGACY_SETTINGS) {
+      expect(props[`codealong.${key}`]?.markdownDeprecationMessage, key).toMatch(/Chrome/);
+    }
   });
 
   it('only allows the known Chrome extension IDs to connect', () => {

@@ -2,6 +2,7 @@ import type { VideoCause, VideoState } from '@codealong/protocol';
 import type { AgentReply, AgentVideoReport, ToAgent } from '../shared/messages';
 import { chooseCandidate, type Candidate } from '../shared/selection';
 import { findVideos } from './discovery';
+import { VideoOverlay } from './overlay';
 import { VideoController } from './videoController';
 
 /**
@@ -23,6 +24,7 @@ export class FrameAgent {
   private scanTimer: ReturnType<typeof setInterval> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private lastTitle: string | null = null;
+  private readonly overlay = new VideoOverlay(() => (this.controller?.video as HTMLElement | undefined) ?? null);
 
   start(): void {
     // A previous agent in this frame (older injection, or one orphaned by an extension reload)
@@ -56,12 +58,14 @@ export class FrameAgent {
     this.scanTimer = this.heartbeatTimer = null;
     this.controller?.detach();
     this.controller = null;
+    this.overlay.update(null);
   }
 
   private dispose(): void {
     if (this.disposed) return;
     this.deactivate();
     this.disposed = true;
+    this.overlay.dispose();
     document.removeEventListener(TAKEOVER_EVENT, this.onTakeover);
     try {
       chrome.runtime.onMessage.removeListener(this.onMessage);
@@ -94,8 +98,17 @@ export class FrameAgent {
       case 'agent:command':
         if (!this.active) break;
         this.log('command', msg.command.command);
-        if (this.controller) this.controller.handle(msg.command);
-        else this.report(null, 'command-failed');
+        if (this.controller) {
+          const wasPaused = this.controller.video.paused;
+          this.controller.handle(msg.command);
+          if (msg.command.command === 'resume' && wasPaused && !this.controller.video.paused)
+            this.overlay.flashResumed();
+        } else {
+          this.report(null, 'command-failed');
+        }
+        break;
+      case 'agent:overlay':
+        this.overlay.update(this.active ? msg.overlay : null);
         break;
     }
     sendResponse({ ok: true });

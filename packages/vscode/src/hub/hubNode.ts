@@ -7,7 +7,7 @@ import {
   type EditorToHub,
   type HubStatus,
 } from '@codealong/protocol';
-import type { CoreSettings, LogEventName } from '../core/hubCore';
+import { DEFAULT_SETTINGS, toCoreSettings, type CoreSettings, type LogEventName } from '../core/hubCore';
 import { CoreRunner } from './coreRunner';
 import { HubServer } from './server';
 
@@ -18,7 +18,13 @@ export interface HubNodeOptions {
   ports: readonly number[];
   editorToken: string;
   allowedOrigins: () => readonly string[];
-  settings: () => CoreSettings;
+  /** Version of this extension, advertised to the browser. */
+  version: string;
+  /**
+   * Settings used until a browser sends its own. The browser owns the settings and sends them on
+   * every (re)connect, so this only matters for tests and for browsers older than 0.2.0.
+   */
+  initialSettings?: CoreSettings;
 }
 
 export interface HubNodeEvents {
@@ -93,13 +99,27 @@ export class HubNode {
   }
 
   control(action: ControlAction): void {
-    if (this.runner) this.runner.dispatch({ type: 'control', action });
+    if (this.runner) this.leaderControl(this.runner, action);
     else this.sendToLeader({ type: 'control', action });
   }
 
-  settingsChanged(): void {
-    this.runner?.dispatch({ type: 'settings', settings: this.options.settings() });
+  private leaderControl(runner: CoreRunner, action: ControlAction): void {
+    if (action !== 'toggleEnabled') {
+      runner.dispatch({ type: 'control', action });
+      return;
+    }
+    // Settings belong to the browser: ask it to flip the switch. It stores the change and sends
+    // the new settings back, which is what actually turns CodeAlong on or off here.
+    const enabled = runner.status().settings?.enabled ?? true;
+    this.server?.sendToBrowser({ type: 'updateSettings', patch: { enabled: !enabled } });
   }
+
+  /** Latest hub status seen by this window (leader: its own; follower: the leader's broadcast). */
+  get status(): HubStatus | null {
+    return this.runner?.status() ?? this.followerStatus;
+  }
+
+  private followerStatus: HubStatus | null = null;
 
   // ---------------------------------------------------------------------------
 
@@ -134,7 +154,7 @@ export class HubNode {
   }
 
   private async tryLead(port: number): Promise<'leader' | 'raced' | 'failed'> {
-    const runner = new CoreRunner(this.options.settings(), {
+    const runner = new CoreRunner(this.options.initialSettings ?? DEFAULT_SETTINGS, {
       sendCommand: (command) => {
         this.server?.sendToBrowser({ type: 'command', id: ++this.commandId, ...command });
       },
@@ -145,7 +165,12 @@ export class HubNode {
       },
     });
     const server = new HubServer(
-      { allowedOrigins: this.options.allowedOrigins, editorToken: this.options.editorToken, hubName: 'vscode' },
+      {
+        allowedOrigins: this.options.allowedOrigins,
+        editorToken: this.options.editorToken,
+        hubName: 'vscode',
+        version: this.options.version,
+      },
       {
         onBrowserConnected: () => runner.dispatch({ type: 'browserConnected' }),
         onBrowserDisconnected: () => runner.dispatch({ type: 'browserDisconnected' }),
@@ -158,12 +183,14 @@ export class HubNode {
             case 'focus':
               return runner.dispatch({ type: 'tutorialFocus', focused: msg.tutorialFocused });
             case 'control':
-              return runner.dispatch({ type: 'control', action: msg.action });
+              return this.leaderControl(runner, msg.action);
+            case 'settings':
+              return runner.dispatch({ type: 'settings', settings: toCoreSettings(msg.settings) });
           }
         },
         onEditorMessage: (msg) => {
           if (msg.type === 'activity') runner.dispatch({ type: msg.kind });
-          else runner.dispatch({ type: 'control', action: msg.action });
+          else this.leaderControl(runner, msg.action);
         },
         onIncompatibleClient: () => this.events.onIncompatible?.(),
         log: (message) => this.events.info(message),
@@ -187,7 +214,6 @@ export class HubNode {
     this.port = port;
     this.lastError = null;
     this.events.info(`Local connection ready (127.0.0.1:${port}); this window hosts CodeAlong.`);
-    runner.dispatch({ type: 'settings', settings: this.options.settings() });
     this.events.onStatus(runner.status(), 'leader');
     return 'leader';
   }
@@ -240,6 +266,7 @@ export class HubNode {
             settle('follower');
             break;
           case 'status':
+            this.followerStatus = msg.status;
             this.events.onStatus(msg.status, 'follower');
             break;
           case 'ping':

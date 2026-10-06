@@ -20,6 +20,8 @@ export interface HubServerOptions {
   /** Shared secret for "editor" clients (other VS Code windows). */
   editorToken: string;
   hubName: string;
+  /** Extension version, advertised in the welcome message. */
+  version?: string;
 }
 
 export interface HubServerEvents {
@@ -197,7 +199,13 @@ export class HubServer {
       return client.ws.close(4005, 'unauthorized');
     }
     client.role = hello.role;
-    send(client.ws, { type: 'welcome', protocol: PROTOCOL_VERSION, hub: this.options.hubName });
+    send(client.ws, {
+      type: 'welcome',
+      protocol: PROTOCOL_VERSION,
+      hub: this.options.hubName,
+      ...(this.options.version ? { version: this.options.version } : {}),
+      features: ['settings'],
+    });
     if (hello.probe) {
       // "Is CodeAlong there?" – answered, never registered, never replaces the real browser.
       this.clients.delete(client);

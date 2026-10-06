@@ -9,10 +9,11 @@
     <header class="header">
       <img src="icons/32.png" width="20" height="20" alt="" />
       <h1>CodeAlong</h1>
-      <label class="switch">
-        <input type="checkbox" id="enabled" role="switch" aria-describedby="enabled-hint" />
+      <label class="switch" title="Automatic pausing on or off">
+        <span id="enabled-text" class="switch-text" aria-hidden="true">On</span>
+        <input type="checkbox" id="enabled" role="switch" />
         <span class="switch-track" aria-hidden="true"></span>
-        <span id="enabled-hint" class="visually-hidden">Turn CodeAlong on or off</span>
+        <span class="visually-hidden">Automatic pausing</span>
       </label>
     </header>
 
@@ -42,16 +43,76 @@
       <button id="follow" type="button" class="primary">Follow this tab</button>
       <div class="row">
         <button id="toggle" type="button" title="Pause or play the tutorial (Alt+Shift+P)">Pause / Play</button>
-        <button id="done" type="button" title="I'm done – continue the tutorial (Alt+Shift+D)">I'm done</button>
+        <button id="done" type="button" title="I'm done – continue the tutorial now (Alt+Shift+D)">I'm done</button>
       </div>
     </div>
+
+    <details id="settings" class="settings">
+      <summary>
+        <span class="summary-title">Settings</span>
+        <span id="settings-summary" class="summary-text"></span>
+      </summary>
+      <div class="settings-body">
+        <div class="setting">
+          <label class="setting-row">
+            <span class="setting-label">Continue after I stop typing</span>
+            <input type="checkbox" id="resumeOnIdle" role="switch" />
+          </label>
+          <div class="slider-row" id="idle-row">
+            <label class="slider-label" for="idleDelaySeconds">Wait</label>
+            <input type="range" id="idleDelaySeconds" step="1" />
+            <output id="idleDelaySeconds-out" for="idleDelaySeconds">5 s</output>
+          </div>
+        </div>
+        <div class="setting">
+          <label class="setting-row">
+            <span class="setting-label">Continue when I save</span>
+            <input type="checkbox" id="resumeOnSave" role="switch" />
+          </label>
+        </div>
+        <div class="setting">
+          <label class="setting-row">
+            <span class="setting-label">Rewind before continuing</span>
+            <input type="checkbox" id="rewindBeforeResume" role="switch" />
+          </label>
+          <div class="slider-row" id="rewind-row">
+            <label class="slider-label" for="rewindSeconds">By</label>
+            <input type="range" id="rewindSeconds" step="1" />
+            <output id="rewindSeconds-out" for="rewindSeconds">2 s</output>
+          </div>
+        </div>
+        <div class="setting">
+          <label class="setting-row">
+            <span class="setting-label">
+              Continue when I return to the tab
+              <span class="setting-hint">Useful on a single screen</span>
+            </span>
+            <input type="checkbox" id="resumeOnFocus" role="switch" />
+          </label>
+        </div>
+        <div class="setting">
+          <label class="setting-row">
+            <span class="setting-label">
+              Show status on the video
+              <span class="setting-hint">"Paused while you code" and a countdown</span>
+            </span>
+            <input type="checkbox" id="showOverlay" role="switch" />
+          </label>
+        </div>
+        <p id="settings-note" class="note"></p>
+        <button id="reset" type="button" class="link-button">Reset to defaults</button>
+      </div>
+    </details>
 
     <footer class="footer">
       <a href="welcome.html" target="_blank">How it works</a>
       <a id="privacy" href="#" target="_blank" rel="noopener">Privacy</a>
-      <details>
+      <a id="issues" href="#" target="_blank" rel="noopener">Report a problem</a>
+      <span id="version" class="version"></span>
+      <details class="troubleshooting">
         <summary>Troubleshooting</summary>
         <label class="check"><input type="checkbox" id="debug" /> Show event log</label>
+        <button id="copy-diagnostics" type="button" class="link-button">Copy diagnostics</button>
         <ol id="log" class="log" aria-label="Recent CodeAlong events"></ol>
       </details>
     </footer>

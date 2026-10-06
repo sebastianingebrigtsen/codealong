@@ -25,6 +25,8 @@ CodeAlong is two extensions and a local connection between them.
 | Which tab is followed, routing, reconnect     | `packages/chrome/src/background/`                                             |
 | Deciding when to pause and resume (state)     | `packages/vscode/src/core/hubCore.ts`                                         |
 | Detecting editor activity                     | `packages/vscode/src/activity.ts`, `extension.ts`                             |
+| Settings: storage, popup UI, sync to VS Code  | `packages/chrome/src/shared/settings.ts`, `background/index.ts`, `popup/`     |
+| Status label on the video                     | `packages/chrome/src/content/overlay.ts`                                      |
 | Local server, authentication                  | `packages/vscode/src/hub/server.ts`                                           |
 | Several VS Code windows                       | `packages/vscode/src/hub/hubNode.ts`                                          |
 | Wire protocol and validation                  | `packages/protocol/src/index.ts`                                              |
@@ -38,7 +40,9 @@ These are product guarantees. Changes that weaken them need a very good reason a
    before calling the media API, and the resulting DOM event is recognised. Any other event is the
    user's (or the site's own player), and clears CodeAlong's ownership. A resume command carries
    the `pauseId` of the CodeAlong pause and is ignored unless the video is still paused by
-   CodeAlong with exactly that id. User intent wins any race.
+   CodeAlong with exactly that id. User intent wins any race. Turning CodeAlong off while it has the
+   video paused sends `release`, which hands that pause to the user, so turning it back on later
+   can't start the video either.
 2. **Source code never leaves VS Code.** Only the facts "edit happened" and "file saved" are
    sent. Document contents, file names and keystrokes are never read for this purpose, sent, or
    logged.
@@ -60,6 +64,30 @@ after 3 seconds.
 
 Status phases shown to users: `disabled`, `waitingForBrowser`, `noTutorial`, `noVideo`, `playing`,
 `coding`, `codingWhilePlaying`, `waitingToResume`, `pausedByUser`, `ended`.
+
+## Settings
+
+The Chrome extension **owns** the settings that shape behaviour (on/off, idle delay, resume on
+save, rewind, resume on tab focus) and stores them in `chrome.storage.local`, which persists across
+browser restarts and extension updates and is never synced to a cloud.
+
+- On every (re)connect, and whenever the user changes something in the popup, Chrome sends a
+  `settings` message. The hub applies it immediately (including to an idle countdown that is
+  already running) and never persists it.
+- VS Code can ask for a change with `updateSettings` (the status bar's on/off). Chrome stores it and
+  sends the new settings back, so there is a single source of truth and no merge logic.
+- Values are validated on both sides with `sanitizeSettings` (unknown keys dropped, numbers clamped
+  and rounded, wrong types replaced by defaults). The 0.1.0 storage format is migrated on start.
+- Why Chrome: settings only matter while Chrome is connected, Chrome is always the side that
+  (re)connects, its popup is where users look for them, and multiple VS Code windows (leader
+  changes) need no coordination because the browser simply re-sends them to whichever window is
+  the hub.
+- Compatibility: hubs advertise `features: ["settings"]` in their welcome. Chrome only sends
+  settings to hubs that support them; a hub that hasn't received any uses defaults. Older and
+  newer extensions therefore keep working together while the stores roll out an update.
+
+Editor-only preferences (`codealong.debugLogging`) stay in VS Code; Chrome-only ones (the status
+label on the video, the event log) stay in Chrome.
 
 ## Connection
 

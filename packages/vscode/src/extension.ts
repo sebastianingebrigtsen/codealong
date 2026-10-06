@@ -1,15 +1,16 @@
 import * as vscode from 'vscode';
-import { HUB_PORTS, parsePortList } from '@codealong/protocol';
+import { HUB_PORTS, describeSettings, parsePortList } from '@codealong/protocol';
 import { createThrottle, isTrackedDocument, isUserEdit } from './activity';
 import { HubNode } from './hub/hubNode';
 import { loadOrCreateEditorToken } from './hub/token';
 import { CHROME_EXTENSION_URL } from './links';
-import { ALLOWED_ORIGINS, readSettings, type ExtensionSettings } from './settings';
+import { ALLOWED_ORIGINS, LEGACY_SETTINGS, readSettings, type ExtensionSettings } from './settings';
 import { StatusBar } from './statusBar';
 
 /** Edits are forwarded at most this often; the first keystroke always goes out immediately. */
 const EDIT_THROTTLE_MS = 200;
 const WELCOMED_KEY = 'codealong.welcomed';
+const SETTINGS_MOVED_KEY = 'codealong.settingsMovedNotice';
 
 let currentNode: HubNode | null = null;
 
@@ -24,12 +25,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (settings.debugLogging) output.appendLine(`${timestamp()} ${message}`);
   };
 
-  registerCommands(
-    context,
-    () => currentNode,
-    () => settings,
-    output,
-  );
+  registerCommands(context, () => currentNode, output);
 
   let warnedIncompatible = false;
   let token: string;
@@ -48,7 +44,7 @@ export function activate(context: vscode.ExtensionContext): void {
       ports: parsePortList(process.env.CODEALONG_HUB_PORTS) ?? HUB_PORTS,
       editorToken: token,
       allowedOrigins: () => ALLOWED_ORIGINS,
-      settings: () => settings.core,
+      version: String(context.extension.packageJSON.version),
     },
     {
       onStatus: (status, role) => statusBar.update(status, role, node.lastError),
@@ -91,12 +87,11 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (!e.affectsConfiguration('codealong')) return;
       settings = loadSettings();
-      node.settingsChanged();
     }),
   );
 
   info(`CodeAlong ${String(context.extension.packageJSON.version)} started.`);
-  void showWelcomeOnce(context);
+  void showWelcomeOnce(context).then(() => explainMovedSettingsOnce(context));
 }
 
 export async function deactivate(): Promise<void> {
@@ -108,21 +103,39 @@ export async function deactivate(): Promise<void> {
 function registerCommands(
   context: vscode.ExtensionContext,
   node: () => HubNode | null,
-  settings: () => ExtensionSettings,
   output: vscode.OutputChannel,
 ): void {
   const mac = process.platform === 'darwin';
   const keys = { toggle: mac ? '⌃⌥P' : 'Ctrl+Alt+P', done: mac ? '⌃⌥D' : 'Ctrl+Alt+D' };
+  const connected = () => !!node()?.status?.browserConnected;
+  const notConnected = () =>
+    vscode.window
+      .showInformationMessage(
+        'CodeAlong is not connected to Chrome yet. In Chrome, click the CodeAlong icon on a tutorial and choose "Follow this tab".',
+        'Get Chrome Extension',
+      )
+      .then((choice) => {
+        if (choice) void vscode.commands.executeCommand('codealong.getChromeExtension');
+      });
 
   context.subscriptions.push(
     vscode.commands.registerCommand('codealong.togglePlayback', () => node()?.control('toggle')),
     vscode.commands.registerCommand('codealong.done', () => node()?.control('done')),
-    vscode.commands.registerCommand('codealong.toggleEnabled', async () => {
-      const enabled = !settings().core.enabled;
-      await vscode.workspace
-        .getConfiguration('codealong')
-        .update('enabled', enabled, vscode.ConfigurationTarget.Global);
-      void vscode.window.setStatusBarMessage(enabled ? 'CodeAlong turned on' : 'CodeAlong turned off', 2_500);
+    vscode.commands.registerCommand('codealong.toggleEnabled', () => {
+      // On/off is a shared setting stored by the Chrome extension, so it needs the connection.
+      if (!connected()) return notConnected();
+      const wasEnabled = node()?.status?.settings?.enabled ?? true;
+      node()?.control('toggleEnabled');
+      void vscode.window.setStatusBarMessage(wasEnabled ? 'CodeAlong turned off' : 'CodeAlong turned on', 2_500);
+    }),
+    vscode.commands.registerCommand('codealong.showSettings', async () => {
+      const settings = node()?.status?.settings;
+      const summary = settings && connected() ? `Now: ${describeSettings(settings)}.` : '';
+      const choice = await vscode.window.showInformationMessage(
+        `CodeAlong's timing and behaviour settings are in Chrome: click the CodeAlong icon, then Settings. ${summary}`,
+        'Debug Logging…',
+      );
+      if (choice) await vscode.commands.executeCommand('workbench.action.openSettings', 'codealong.debugLogging');
     }),
     vscode.commands.registerCommand('codealong.showLog', () => output.show(true)),
     vscode.commands.registerCommand('codealong.getChromeExtension', () =>
@@ -136,8 +149,8 @@ function registerCommands(
       ),
     ),
     vscode.commands.registerCommand('codealong.showMenu', async () => {
-      const enabled = settings().core.enabled;
-      const items: (vscode.QuickPickItem & { command: string; args?: unknown[] })[] = [
+      const enabled = node()?.status?.settings?.enabled ?? true;
+      const items: (vscode.QuickPickItem & { command: string })[] = [
         {
           label: '$(debug-continue) Pause or Play Tutorial',
           description: keys.toggle,
@@ -145,17 +158,31 @@ function registerCommands(
         },
         { label: "$(check) I'm Done – Continue Tutorial", description: keys.done, command: 'codealong.done' },
         {
-          label: enabled ? '$(circle-slash) Turn Off CodeAlong' : '$(play-circle) Turn On CodeAlong',
+          label: enabled ? '$(circle-slash) Turn Off Automatic Pausing' : '$(play-circle) Turn On Automatic Pausing',
           command: 'codealong.toggleEnabled',
         },
-        { label: '$(gear) Settings', command: 'workbench.action.openSettings', args: ['@ext:' + context.extension.id] },
+        { label: '$(settings-gear) Timing and Settings…', command: 'codealong.showSettings' },
         { label: '$(book) How CodeAlong Works', command: 'codealong.openWalkthrough' },
-        { label: '$(globe) Get the Chrome Extension', command: 'codealong.getChromeExtension' },
-        { label: '$(output) Show Log', command: 'codealong.showLog' },
       ];
+      if (!connected()) {
+        items.push({ label: '$(globe) Get the Chrome Extension', command: 'codealong.getChromeExtension' });
+      }
+      items.push({ label: '$(output) Show Log', command: 'codealong.showLog' });
       const pick = await vscode.window.showQuickPick(items, { placeHolder: 'CodeAlong' });
-      if (pick) await vscode.commands.executeCommand(pick.command, ...(pick.args ?? []));
+      if (pick) await vscode.commands.executeCommand(pick.command);
     }),
+  );
+}
+
+/** 0.1.0 kept timing settings in VS Code. Tell users who changed them, once, where they went. */
+async function explainMovedSettingsOnce(context: vscode.ExtensionContext): Promise<void> {
+  if (context.globalState.get<boolean>(SETTINGS_MOVED_KEY)) return;
+  const cfg = vscode.workspace.getConfiguration('codealong');
+  const customised = LEGACY_SETTINGS.some((key) => cfg.inspect(key)?.globalValue !== undefined);
+  await context.globalState.update(SETTINGS_MOVED_KEY, true);
+  if (!customised) return;
+  void vscode.window.showInformationMessage(
+    "CodeAlong's timing settings have moved to the Chrome extension: click the CodeAlong icon, then Settings. The old VS Code settings are no longer used.",
   );
 }
 
