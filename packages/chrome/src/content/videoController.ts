@@ -102,6 +102,11 @@ export class VideoController {
         if (this.video.paused) this.userPlay();
         else this.report(this.state(), 'sync');
         return;
+      case 'release':
+        // CodeAlong was turned off: its pause becomes the user's, so it is never resumed later.
+        if (this.owner === 'codealong' && this.pauseId === cmd.pauseId) this.setOwner('user', null);
+        this.report(this.state(), 'sync');
+        return;
     }
   }
 

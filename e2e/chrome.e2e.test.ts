@@ -17,7 +17,6 @@ import * as path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { chromium, type BrowserContext, type Frame, type Page, type Worker } from 'playwright';
 import { DEV_CHROME_EXTENSION_ID, type HubStatus } from '@codealong/protocol';
-import { DEFAULT_SETTINGS } from '../packages/vscode/src/core/hubCore';
 import { HubNode } from '../packages/vscode/src/hub/hubNode';
 import { loadOrCreateEditorToken } from '../packages/vscode/src/hub/token';
 
@@ -25,7 +24,8 @@ const ROOT = path.resolve(__dirname, '..');
 // A separate build with test-only ports, so a real CodeAlong running on this machine is never touched.
 const EXTENSION_DIR = path.join(ROOT, 'e2e/.artifacts/chrome');
 const TEST_PORTS = [48390, 48391];
-const IDLE_MS = 800;
+// Set through the popup's settings, like a user would (1 s is the shortest allowed).
+const IDLE_MS = 1_000;
 
 let tmp: string;
 let server: https.Server;
@@ -199,7 +199,7 @@ beforeAll(async () => {
       ports: TEST_PORTS,
       editorToken: loadOrCreateEditorToken(path.join(tmp, 'token')),
       allowedOrigins: () => [`chrome-extension://${DEV_CHROME_EXTENSION_ID}`],
-      settings: () => ({ ...DEFAULT_SETTINGS, idleDelayMs: IDLE_MS }),
+      version: 'e2e',
     },
     {
       onStatus: (s) => {
@@ -232,7 +232,8 @@ beforeAll(async () => {
   }
   const worker: Worker = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'));
   expect(worker.url()).toContain(DEV_CHROME_EXTENSION_ID); // the pinned key gives the expected ID
-  if (process.env.E2E_DEBUG) await sendToWorker({ type: 'popup:setDebug', debug: true });
+  if (process.env.E2E_DEBUG) await sendToWorker({ type: 'popup:setSettings', patch: { debug: true } });
+  await sendToWorker({ type: 'popup:setSettings', patch: { idleDelaySeconds: IDLE_MS / 1000 } });
 }, 60_000);
 
 afterAll(async () => {
@@ -405,6 +406,93 @@ describe('Chrome extension (real Chromium)', () => {
     }, 'shadow-DOM video resumed');
     expect(resumed.time).toBeLessThan(paused.time - 1.5);
     await mux.close();
+  });
+
+  it('shows why the video is paused, with a countdown, on the video itself', async () => {
+    const tabId = await tabIdFor('https://www.youtube.com/watch');
+    expect(await sendToWorker({ type: 'popup:follow', tabId })).toEqual({ ok: true });
+    await page.evaluate(() => (document.getElementById('main') as HTMLVideoElement).play());
+    await waitFor(() => hubStatus?.phase === 'playing', 'playing');
+    // A longer delay makes both label states observable.
+    await sendToWorker({ type: 'popup:setSettings', patch: { idleDelaySeconds: 5 } });
+    await waitFor(() => hubStatus?.settings?.idleDelaySeconds === 5, 'hub got the new delay');
+
+    const label = () =>
+      page.evaluate(() => {
+        const host = document.querySelector('codealong-status');
+        const pill = host?.shadowRoot?.querySelector('.pill');
+        return pill?.classList.contains('visible') ? (pill.textContent ?? '').replace(/\s+/g, ' ').trim() : null;
+      });
+    node.activity('edit');
+    await waitFor(async () => (await label())?.includes('Paused while you code'), 'label while coding');
+    expect(await label()).toContain('Continues 5 s after you stop typing');
+    await waitFor(async () => (await label())?.includes('Continuing in'), 'countdown');
+    await waitFor(async () => (await label())?.includes('Rewound 2 s'), 'resume confirmation', 10_000);
+    await waitFor(async () => (await label()) === null, 'label disappears');
+
+    // It can be turned off.
+    await sendToWorker({ type: 'popup:setSettings', patch: { showOverlay: false } });
+    node.activity('edit');
+    await waitFor(async () => (await videoState(page)).paused, 'paused again');
+    await page.waitForTimeout(500);
+    expect(await label()).toBeNull();
+    node.control('done');
+    await waitFor(async () => !(await videoState(page)).paused, 'done');
+    await sendToWorker({ type: 'popup:setSettings', patch: { showOverlay: true, idleDelaySeconds: IDLE_MS / 1000 } });
+  });
+
+  it('popup settings reach VS Code, survive a service worker restart, and reset to defaults', async () => {
+    const popup = await extensionPage();
+    await popup.click('#settings > summary');
+    await popup.waitForSelector('#idleDelaySeconds', { state: 'visible' });
+    // Drag the slider like a user: input events while moving, change on release.
+    await popup.$eval('#idleDelaySeconds', (el) => {
+      const input = el as HTMLInputElement;
+      input.value = '9';
+      input.dispatchEvent(new Event('input'));
+      input.dispatchEvent(new Event('change'));
+    });
+    expect(await popup.textContent('#idleDelaySeconds-out')).toBe('9 s');
+    await popup.click('label:has(#resumeOnSave)');
+    await waitFor(
+      () => hubStatus?.settings?.idleDelaySeconds === 9 && hubStatus.settings.resumeOnSave === false,
+      'VS Code applied the popup settings',
+    );
+    await waitFor(async () => (await popup.textContent('#settings-note'))?.includes('apply in VS Code'), 'note');
+    await popup.close();
+
+    // Chrome may stop the worker at any time; the settings must come back from storage.
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('ServiceWorker.enable');
+    await cdp.send('ServiceWorker.stopAllWorkers');
+    const status = await sendToWorker<{ settings: { shared: { idleDelaySeconds: number; resumeOnSave: boolean } } }>({
+      type: 'popup:getStatus',
+    });
+    expect(status.settings.shared).toMatchObject({ idleDelaySeconds: 9, resumeOnSave: false });
+
+    const reset = await sendToWorker<{ settings: { shared: Record<string, unknown> } }>({
+      type: 'popup:resetSettings',
+    });
+    expect(reset.settings.shared).toMatchObject({ idleDelaySeconds: 5, resumeOnSave: true, rewindSeconds: 2 });
+    await waitFor(() => hubStatus?.settings?.idleDelaySeconds === 5, 'reset reached VS Code', 15_000);
+    await sendToWorker({ type: 'popup:setSettings', patch: { idleDelaySeconds: IDLE_MS / 1000 } });
+    await waitFor(() => hubStatus?.settings?.idleDelaySeconds === IDLE_MS / 1000, 'test delay restored');
+  }, 40_000);
+
+  it('the on/off switch stops automatic pausing without disconnecting, and releases its pause', async () => {
+    await waitFor(() => hubStatus?.phase === 'playing', 'playing');
+    node.activity('edit');
+    await waitFor(async () => (await videoState(page)).paused, 'paused by CodeAlong');
+
+    await sendToWorker({ type: 'popup:setSettings', patch: { enabled: false } });
+    await waitFor(() => hubStatus?.phase === 'disabled', 'VS Code shows off');
+    expect(hubStatus?.browserConnected).toBe(true);
+    // The pause now belongs to the user: turning CodeAlong back on never starts the video.
+    await sendToWorker({ type: 'popup:setSettings', patch: { enabled: true } });
+    await waitFor(() => hubStatus?.phase === 'pausedByUser', 'pause handed to the user');
+    await page.waitForTimeout(IDLE_MS * 3);
+    expect((await videoState(page)).paused).toBe(true);
+    await page.evaluate(() => (document.getElementById('main') as HTMLVideoElement).play());
   });
 
   it('recovers when Chrome stops the service worker while the video is paused (MV3 lifecycle)', async () => {

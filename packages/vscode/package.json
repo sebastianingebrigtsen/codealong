@@ -2,7 +2,7 @@
   "name": "codealong",
   "displayName": "CodeAlong",
   "description": "Coding tutorials that wait for you. Pauses the video in Chrome while you type and continues when you're done.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "SebastianIngebrigtsen",
   "private": true,
   "license": "MIT",
@@ -70,7 +70,12 @@
       },
       {
         "command": "codealong.toggleEnabled",
-        "title": "Turn On/Off",
+        "title": "Turn Automatic Pausing On/Off",
+        "category": "CodeAlong"
+      },
+      {
+        "command": "codealong.showSettings",
+        "title": "Timing and Settings",
         "category": "CodeAlong"
       },
       {
@@ -107,26 +112,39 @@
     "configuration": {
       "title": "CodeAlong",
       "properties": {
+        "codealong.debugLogging": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "order": 0,
+          "markdownDescription": "Write every CodeAlong event to the **CodeAlong** output channel (for troubleshooting). Your code is never logged."
+        },
         "codealong.enabled": {
           "type": "boolean",
           "default": true,
           "scope": "application",
-          "order": 0,
-          "description": "Let CodeAlong pause and continue the tutorial automatically. Turn off to keep CodeAlong installed but inactive."
+          "order": 10,
+          "description": "Let CodeAlong pause and continue the tutorial automatically. Turn off to keep CodeAlong installed but inactive.",
+          "markdownDeprecationMessage": "Moved to the Chrome extension in 0.2.0: click the CodeAlong icon in Chrome, then **Settings**. This VS Code setting is no longer used.",
+          "deprecationMessage": "Moved to the Chrome extension in 0.2.0: click the CodeAlong icon in Chrome, then Settings. This VS Code setting is no longer used."
         },
         "codealong.pauseOnTyping": {
           "type": "boolean",
           "default": true,
           "scope": "application",
-          "order": 1,
-          "description": "Pause the tutorial as soon as you start editing code."
+          "order": 11,
+          "description": "Pause the tutorial as soon as you start editing code.",
+          "markdownDeprecationMessage": "Moved to the Chrome extension in 0.2.0: click the CodeAlong icon in Chrome, then **Settings**. This VS Code setting is no longer used.",
+          "deprecationMessage": "Moved to the Chrome extension in 0.2.0: click the CodeAlong icon in Chrome, then Settings. This VS Code setting is no longer used."
         },
         "codealong.resumeAfterIdle": {
           "type": "boolean",
           "default": true,
           "scope": "application",
-          "order": 2,
-          "markdownDescription": "Continue the tutorial when you have stopped typing for `#codealong.idleDelaySeconds#` seconds."
+          "order": 12,
+          "markdownDescription": "Continue the tutorial when you have stopped typing for `#codealong.idleDelaySeconds#` seconds.",
+          "markdownDeprecationMessage": "Moved to the Chrome extension in 0.2.0: click the CodeAlong icon in Chrome, then **Settings**. This VS Code setting is no longer used.",
+          "deprecationMessage": "Moved to the Chrome extension in 0.2.0: click the CodeAlong icon in Chrome, then Settings. This VS Code setting is no longer used."
         },
         "codealong.idleDelaySeconds": {
           "type": "number",
@@ -134,29 +152,37 @@
           "minimum": 1,
           "maximum": 600,
           "scope": "application",
-          "order": 3,
-          "description": "How many seconds without typing count as \"done\"."
+          "order": 13,
+          "description": "How many seconds without typing count as \"done\".",
+          "markdownDeprecationMessage": "Moved to the Chrome extension in 0.2.0: click the CodeAlong icon in Chrome, then **Settings**. This VS Code setting is no longer used.",
+          "deprecationMessage": "Moved to the Chrome extension in 0.2.0: click the CodeAlong icon in Chrome, then Settings. This VS Code setting is no longer used."
         },
         "codealong.resumeOnSave": {
           "type": "boolean",
           "default": true,
           "scope": "application",
-          "order": 4,
-          "description": "Treat saving a file (Ctrl+S / Cmd+S) as \"done\" and continue about a second later, unless you keep typing. Auto save is ignored."
+          "order": 14,
+          "description": "Treat saving a file (Ctrl+S / Cmd+S) as \"done\" and continue about a second later, unless you keep typing. Auto save is ignored.",
+          "markdownDeprecationMessage": "Moved to the Chrome extension in 0.2.0: click the CodeAlong icon in Chrome, then **Settings**. This VS Code setting is no longer used.",
+          "deprecationMessage": "Moved to the Chrome extension in 0.2.0: click the CodeAlong icon in Chrome, then Settings. This VS Code setting is no longer used."
         },
         "codealong.resumeOnTutorialFocus": {
           "type": "boolean",
           "default": false,
           "scope": "application",
-          "order": 5,
-          "description": "Continue when you switch back to the tutorial tab in Chrome. Useful on a single screen; with two screens it may continue when you only click the browser."
+          "order": 15,
+          "description": "Continue when you switch back to the tutorial tab in Chrome. Useful on a single screen; with two screens it may continue when you only click the browser.",
+          "markdownDeprecationMessage": "Moved to the Chrome extension in 0.2.0: click the CodeAlong icon in Chrome, then **Settings**. This VS Code setting is no longer used.",
+          "deprecationMessage": "Moved to the Chrome extension in 0.2.0: click the CodeAlong icon in Chrome, then Settings. This VS Code setting is no longer used."
         },
         "codealong.rewindBeforeResume": {
           "type": "boolean",
           "default": true,
           "scope": "application",
-          "order": 6,
-          "description": "Rewind a little before continuing automatically, so you hear the end of what the instructor was saying."
+          "order": 16,
+          "description": "Rewind a little before continuing automatically, so you hear the end of what the instructor was saying.",
+          "markdownDeprecationMessage": "Moved to the Chrome extension in 0.2.0: click the CodeAlong icon in Chrome, then **Settings**. This VS Code setting is no longer used.",
+          "deprecationMessage": "Moved to the Chrome extension in 0.2.0: click the CodeAlong icon in Chrome, then Settings. This VS Code setting is no longer used."
         },
         "codealong.rewindSeconds": {
           "type": "number",
@@ -164,15 +190,10 @@
           "minimum": 0,
           "maximum": 60,
           "scope": "application",
-          "order": 7,
-          "description": "How many seconds to rewind before continuing automatically."
-        },
-        "codealong.debugLogging": {
-          "type": "boolean",
-          "default": false,
-          "scope": "application",
-          "order": 8,
-          "markdownDescription": "Write every CodeAlong event to the **CodeAlong** output channel (for troubleshooting). Your code is never logged."
+          "order": 17,
+          "description": "How many seconds to rewind before continuing automatically.",
+          "markdownDeprecationMessage": "Moved to the Chrome extension in 0.2.0: click the CodeAlong icon in Chrome, then **Settings**. This VS Code setting is no longer used.",
+          "deprecationMessage": "Moved to the Chrome extension in 0.2.0: click the CodeAlong icon in Chrome, then Settings. This VS Code setting is no longer used."
         }
       }
     },
@@ -201,15 +222,15 @@
           {
             "id": "code",
             "title": "Just code",
-            "description": "Start typing and the tutorial pauses. Stop typing for a few seconds, or save the file, and it continues, rewound by two seconds. If you pause the video yourself, CodeAlong never starts it again on its own.",
+            "description": "Start typing and the tutorial pauses. Stop typing for a few seconds, or save the file, and it rewinds a little and continues. If you pause the video yourself, CodeAlong never starts it again on its own.",
             "media": {
               "markdown": "media/walkthrough/code.md"
             }
           },
           {
             "id": "control",
-            "title": "Stay in control",
-            "description": "Use **Ctrl+Alt+P** (⌃⌥P on macOS) to pause or play and **Ctrl+Alt+D** (⌃⌥D) to continue right away. Click **CodeAlong** in the status bar to turn it off for a while or change the timing.\n[Open Settings](command:workbench.action.openSettings?%5B%22codealong%22%5D)",
+            "title": "Adjust it to your pace",
+            "description": "Change how long CodeAlong waits and how far it rewinds in Chrome: click the CodeAlong icon, then **Settings**. Use **Ctrl+Alt+P** (⌃⌥P on macOS) to pause or play and **Ctrl+Alt+D** (⌃⌥D) to continue right away. Click **CodeAlong** in the status bar to turn automatic pausing off for a while.",
             "media": {
               "markdown": "media/walkthrough/control.md"
             }
@@ -219,7 +240,7 @@
     ]
   },
   "dependencies": {
-    "@codealong/protocol": "0.1.0",
+    "@codealong/protocol": "0.2.0",
     "ws": "^8.22.0"
   }
 }

@@ -128,6 +128,28 @@ describe('resume', () => {
   });
 });
 
+describe('release (CodeAlong turned off)', () => {
+  it('turns its own pause into a user pause, which is then never resumed', async () => {
+    const { video, controller, causes } = await attached();
+    controller.handle({ command: 'pause', pauseId: 'p1' });
+    await flush();
+    controller.handle({ command: 'release', pauseId: 'p1' });
+    expect(controller.state()).toMatchObject({ status: 'paused', owner: 'user', pauseId: null });
+    expect(video.getAttribute(PAUSE_MARKER_ATTR)).toBeNull();
+    controller.handle({ command: 'resume', pauseId: 'p1', rewindSeconds: 2 });
+    await flush();
+    expect(video.paused).toBe(true);
+    expect(causes()).toEqual(['codealong-pause', 'sync', 'sync']);
+  });
+
+  it('ignores a release for another pause', async () => {
+    const { controller } = await attached();
+    controller.handle({ command: 'pause', pauseId: 'p2' });
+    controller.handle({ command: 'release', pauseId: 'p1' });
+    expect(controller.state()).toMatchObject({ owner: 'codealong', pauseId: 'p2' });
+  });
+});
+
 describe('user commands', () => {
   it('toggle pauses as the user and plays without rewind', async () => {
     const { video, controller, causes } = await attached({ time: 30 });

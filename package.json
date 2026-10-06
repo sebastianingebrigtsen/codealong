@@ -1,7 +1,7 @@
 {
   "name": "codealong",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Coding tutorials that wait for you. Pauses the tutorial in Chrome while you code in VS Code.",
   "license": "MIT",
   "repository": {

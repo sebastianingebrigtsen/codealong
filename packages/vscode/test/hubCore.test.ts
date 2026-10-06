@@ -437,15 +437,98 @@ describe('video changes', () => {
 });
 
 describe('settings', () => {
-  it('disabling ends the session and cancels any scheduled resume', () => {
+  const settings = (overrides: Partial<CoreSettings>): CoreEvent => ({
+    type: 'settings',
+    settings: { ...DEFAULT_SETTINGS, idleDelayMs: IDLE, ...overrides },
+  });
+
+  it('turning off ends the session and hands a CodeAlong pause over to the user', () => {
+    const h = harness();
+    h.connect();
+    h.edit();
+    const pauseId = h.ackPause();
+    h.dispatch(settings({ enabled: false }));
+    expect(h.sent.at(-1)).toEqual({ command: 'release', pauseId });
+    expect(h.logs).toContain('PAUSE_RELEASED');
+    h.video(pausedBy('user'), 'sync'); // the browser confirms the hand-over
+    h.advance(IDLE * 2);
+    expect(h.core.getStatus().phase).toBe('disabled');
+    // Turning it back on never starts that video by surprise.
+    h.dispatch(settings({ enabled: true }));
+    h.advance(IDLE * 3);
+    expect(h.commands()).toEqual(['pause', 'release']);
+  });
+
+  it('while off, typing does not pause', () => {
+    const h = harness({ enabled: false });
+    h.connect();
+    h.edit();
+    h.advance(IDLE);
+    expect(h.sent).toEqual([]);
+  });
+
+  it('a shorter idle delay applies to the countdown that is already running', () => {
     const h = harness();
     h.connect();
     h.edit();
     h.ackPause();
-    h.dispatch({ type: 'settings', settings: { ...DEFAULT_SETTINGS, enabled: false } });
-    h.advance(IDLE * 2);
+    h.advance(1_000);
+    h.dispatch(settings({ idleDelayMs: 2_000 }));
+    h.advance(999);
     expect(h.commands()).toEqual(['pause']);
-    expect(h.core.getStatus().phase).toBe('disabled');
+    h.advance(1);
+    expect(h.commands()).toEqual(['pause', 'resume']);
+  });
+
+  it('a delay that has already passed resumes on the next tick, and a longer one waits longer', () => {
+    const quick = harness();
+    quick.connect();
+    quick.edit();
+    quick.ackPause();
+    quick.advance(3_000);
+    quick.dispatch(settings({ idleDelayMs: 1_000 }));
+    quick.advance(0);
+    expect(quick.commands()).toEqual(['pause', 'resume']);
+
+    const slow = harness();
+    slow.connect();
+    slow.edit();
+    slow.ackPause();
+    slow.dispatch(settings({ idleDelayMs: 20_000 }));
+    slow.advance(19_999);
+    expect(slow.commands()).toEqual(['pause']);
+    slow.advance(1);
+    expect(slow.commands()).toEqual(['pause', 'resume']);
+  });
+
+  it('rewind changes apply to the next resume', () => {
+    const h = harness();
+    h.connect();
+    h.edit();
+    h.ackPause();
+    h.dispatch(settings({ rewindSeconds: 7 }));
+    h.advance(IDLE);
+    expect(h.sent.at(-1)).toMatchObject({ command: 'resume', rewindSeconds: 7 });
+  });
+
+  it('turning off idle resume during a pause leaves it to save or the shortcut', () => {
+    const h = harness();
+    h.connect();
+    h.edit();
+    h.ackPause();
+    h.dispatch(settings({ resumeOnIdle: false }));
+    h.advance(IDLE * 3);
+    expect(h.commands()).toEqual(['pause']);
+    expect(h.core.getStatus().phase).toBe('waitingToResume');
+    h.save();
+    h.advance(SAVE_SETTLE_MS);
+    expect(h.commands()).toEqual(['pause', 'resume']);
+  });
+
+  it('reports the settings in effect in its status', () => {
+    const h = harness();
+    h.dispatch(settings({ idleDelayMs: 9_000, rewindSeconds: 4, resumeOnFocus: true }));
+    expect(h.core.getStatus().settings).toMatchObject({ idleDelaySeconds: 9, rewindSeconds: 4, resumeOnFocus: true });
   });
 });
 

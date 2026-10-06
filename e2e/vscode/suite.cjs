@@ -15,7 +15,7 @@ const WsClient = require(path.join(process.env.CODEALONG_ROOT, 'node_modules/ws'
 const PORT = 48395; // matches CODEALONG_HUB_PORTS in run.mjs
 const ORIGIN = 'chrome-extension://golihbblpnhanlhgnnngcfhmolomajoo';
 const WAIT_MS = 30_000;
-const LONG_IDLE_S = 60;
+const LONG_IDLE_S = 30; // the longest idle delay CodeAlong allows
 const SHORT_IDLE_S = 2;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -31,6 +31,18 @@ async function waitFor(cond, what, ms = WAIT_MS) {
 /** A fake Chrome extension: reports a video and obeys commands like the real VideoController. */
 function fakeBrowser() {
   const commands = [];
+  // Like the real Chrome extension, the fake browser owns the settings and sends them to VS Code.
+  const settings = {
+    enabled: true,
+    resumeOnIdle: true,
+    idleDelaySeconds: LONG_IDLE_S,
+    resumeOnSave: true,
+    rewindBeforeResume: true,
+    rewindSeconds: 2,
+    resumeOnFocus: false,
+  };
+  let status = null;
+  let features = [];
   const video = { status: 'playing', owner: null, pauseId: null, currentTime: 30, duration: 600 };
   const ws = new WsClient(`ws://127.0.0.1:${PORT}`, { headers: { Origin: ORIGIN } });
   const report = (cause) => ws.send(JSON.stringify({ type: 'video', video, cause }));
@@ -38,8 +50,15 @@ function fakeBrowser() {
   ws.on('message', (data) => {
     const msg = JSON.parse(String(data));
     if (msg.type === 'welcome') {
+      features = msg.features ?? [];
+      if (features.includes('settings')) ws.send(JSON.stringify({ type: 'settings', settings }));
       ws.send(JSON.stringify({ type: 'tutorial', tutorial: { tabId: 1, title: 'E2E', host: 'youtube.com' } }));
       report('play');
+    } else if (msg.type === 'status') {
+      status = msg.status;
+    } else if (msg.type === 'updateSettings') {
+      Object.assign(settings, msg.patch);
+      ws.send(JSON.stringify({ type: 'settings', settings }));
     } else if (msg.type === 'ping') {
       ws.send('{"type":"pong"}');
     } else if (msg.type === 'command') {
@@ -55,6 +74,9 @@ function fakeBrowser() {
           currentTime: Math.max(0, video.currentTime - msg.rewindSeconds),
         });
         report('codealong-resume');
+      } else if (msg.command === 'release' && video.owner === 'codealong' && video.pauseId === msg.pauseId) {
+        Object.assign(video, { owner: 'user', pauseId: null });
+        report('sync');
       } else if (msg.command === 'userToggle') {
         if (video.status === 'playing') Object.assign(video, { status: 'paused', owner: 'user' });
         else Object.assign(video, { status: 'playing', owner: null, pauseId: null });
@@ -66,6 +88,16 @@ function fakeBrowser() {
     ws,
     commands,
     video,
+    settings,
+    status: () => status,
+    features: () => features,
+    /** Changes a setting the way the popup does, and waits until VS Code applies it. */
+    async setSettings(patch) {
+      Object.assign(settings, patch);
+      ws.send(JSON.stringify({ type: 'settings', settings }));
+      const want = JSON.stringify(settings);
+      await waitFor(() => JSON.stringify(status?.settings) === want, `VS Code applied ${JSON.stringify(patch)}`);
+    },
     count: (command) => commands.filter((c) => c.command === command).length,
     last: (command) => commands.filter((c) => c.command === command).at(-1),
     opened: new Promise((r, j) => {
@@ -98,11 +130,8 @@ exports.run = async function run() {
 
   const cfg = vscode.workspace.getConfiguration('codealong');
   const G = vscode.ConfigurationTarget.Global;
-  const setIdle = async (seconds) => {
-    await cfg.update('idleDelaySeconds', seconds, G);
-    await sleep(300); // let the extension's configuration listener apply it
-  };
-  await setIdle(LONG_IDLE_S);
+  let browser;
+  const setIdle = (seconds) => browser.setSettings({ idleDelaySeconds: seconds });
   await cfg.update('debugLogging', true, G);
 
   const manifest = JSON.parse(
@@ -120,7 +149,6 @@ exports.run = async function run() {
 
   await step('walkthrough opens', () => vscode.commands.executeCommand('codealong.openWalkthrough'));
 
-  let browser;
   await step('hub accepts the Chrome extension', async () => {
     const start = Date.now();
     while (!browser && Date.now() - start < WAIT_MS) {
@@ -133,6 +161,8 @@ exports.run = async function run() {
       }
     }
     if (!browser) throw new Error('no connection');
+    await waitFor(() => browser.features().includes('settings'), 'hub advertises settings support');
+    await waitFor(() => browser.status()?.settings?.idleDelaySeconds === LONG_IDLE_S, 'settings from Chrome applied');
     await waitFor(() => browser.commands.length === 0 && browser.ws.readyState === 1, 'connection ready');
   });
 
@@ -232,9 +262,10 @@ exports.run = async function run() {
     }
   });
 
-  await step('turning CodeAlong off applies immediately', async () => {
-    await cfg.update('enabled', false, G);
-    await sleep(300);
+  await step('"Turn off" in VS Code is stored by Chrome and applies immediately', async () => {
+    await vscode.commands.executeCommand('codealong.toggleEnabled');
+    await waitFor(() => browser.settings.enabled === false, 'Chrome stored the change');
+    await waitFor(() => browser.status()?.phase === 'disabled', 'VS Code applied it');
     await vscode.commands.executeCommand('codealong.togglePlayback'); // user plays
     await waitFor(() => browser.video.status === 'playing', 'playing');
     const pauses = browser.count('pause');

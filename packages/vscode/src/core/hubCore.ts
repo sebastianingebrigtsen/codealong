@@ -1,11 +1,13 @@
-import type {
-  ControlAction,
-  HubStatus,
-  StatusPhase,
-  TutorialInfo,
-  VideoCause,
-  VideoCommand,
-  VideoState,
+import {
+  DEFAULT_SHARED_SETTINGS,
+  type ControlAction,
+  type HubStatus,
+  type SharedSettings,
+  type StatusPhase,
+  type TutorialInfo,
+  type VideoCause,
+  type VideoCommand,
+  type VideoState,
 } from '@codealong/protocol';
 
 /**
@@ -31,16 +33,34 @@ export interface CoreSettings {
   rewindSeconds: number;
 }
 
-export const DEFAULT_SETTINGS: CoreSettings = {
-  enabled: true,
-  pauseOnTyping: true,
-  resumeOnIdle: true,
-  idleDelayMs: 5_000,
-  resumeOnSave: true,
-  resumeOnFocus: false,
-  rewindBeforeResume: true,
-  rewindSeconds: 2,
-};
+/** Converts the settings the browser owns into the core's internal form. */
+export function toCoreSettings(s: SharedSettings): CoreSettings {
+  return {
+    enabled: s.enabled,
+    pauseOnTyping: true,
+    resumeOnIdle: s.resumeOnIdle,
+    idleDelayMs: s.idleDelaySeconds * 1000,
+    resumeOnSave: s.resumeOnSave,
+    resumeOnFocus: s.resumeOnFocus,
+    rewindBeforeResume: s.rewindBeforeResume,
+    rewindSeconds: s.rewindSeconds,
+  };
+}
+
+function toSharedSettings(s: CoreSettings): SharedSettings {
+  return {
+    enabled: s.enabled,
+    resumeOnIdle: s.resumeOnIdle,
+    idleDelaySeconds: Math.round(s.idleDelayMs / 1000),
+    resumeOnSave: s.resumeOnSave,
+    rewindBeforeResume: s.rewindBeforeResume,
+    rewindSeconds: s.rewindSeconds,
+    resumeOnFocus: s.resumeOnFocus,
+  };
+}
+
+/** Used until a browser sends its settings (and for browsers older than 0.2.0, which never do). */
+export const DEFAULT_SETTINGS: CoreSettings = toCoreSettings(DEFAULT_SHARED_SETTINGS);
 
 /** How long after a manual save we wait for more typing before treating the save as "done". */
 export const SAVE_SETTLE_MS = 1_000;
@@ -75,6 +95,8 @@ export type LogEventName =
   | 'PAUSE_REQUESTED'
   | 'PAUSE_SKIPPED'
   | 'VIDEO_PAUSED_BY_CODEALONG'
+  | 'PAUSE_RELEASED'
+  | 'SETTINGS_CHANGED'
   | 'ADOPTED_CODEALONG_PAUSE'
   | 'FILE_SAVED'
   | 'SAVE_RESUME_CANCELLED'
@@ -106,6 +128,8 @@ export class HubCore {
   private suppressAutoPause = false;
   /** When the current coding session is considered over (idle). */
   private idleDeadline: number | null = null;
+  /** Last activity the idle deadline is measured from, so a new idle delay applies immediately. */
+  private lastActivityAt: number | null = null;
   /** When a manual save turns into a resume, unless the user keeps typing. */
   private saveResumeAt: number | null = null;
 
@@ -182,6 +206,7 @@ export class HubCore {
       browserConnected: this.browserConnected,
       tutorialTitle: this.tutorial?.title ?? null,
       resumeAt: this.expectedResumeAt(),
+      settings: toSharedSettings(this.settings),
     };
   }
 
@@ -200,16 +225,35 @@ export class HubCore {
   // -------------------------------------------------------------------------
 
   private onSettings(next: CoreSettings): void {
-    const wasEnabled = this.settings.enabled;
+    const prev = this.settings;
     this.settings = { ...next };
-    if (wasEnabled && !next.enabled) {
+    if (JSON.stringify(prev) !== JSON.stringify(next)) this.log('SETTINGS_CHANGED');
+
+    if (prev.enabled && !next.enabled) {
       this.log('DISABLED');
       this.endCodingSession();
       this.pending = null;
-    } else if (!wasEnabled && next.enabled) {
+      // Hand a CodeAlong pause over to the user: turning CodeAlong back on later must never
+      // start the video by surprise.
+      const v = this.video;
+      if (v?.status === 'paused' && v.owner === 'codealong' && v.pauseId && this.browserConnected) {
+        this.send({ command: 'release', pauseId: v.pauseId });
+        this.log('PAUSE_RELEASED', 'CodeAlong was turned off');
+      }
+    } else if (!prev.enabled && next.enabled) {
       this.log('ENABLED');
     }
     if (!next.resumeOnSave) this.saveResumeAt = null;
+    // A changed idle delay applies to the countdown that is already running (a deadline in the
+    // past simply fires on the next tick).
+    if (this.idleDeadline !== null && this.lastActivityAt !== null && prev.idleDelayMs !== next.idleDelayMs) {
+      this.idleDeadline = this.lastActivityAt + next.idleDelayMs;
+    }
+  }
+
+  private scheduleIdle(now: number): void {
+    this.lastActivityAt = now;
+    this.idleDeadline = now + this.settings.idleDelayMs;
   }
 
   private onTutorial(tutorial: TutorialInfo | null): void {
@@ -245,9 +289,7 @@ export class HubCore {
         this.log('VIDEO_SEEKED');
         // Scrubbing during a CodeAlong pause usually means "let me look at that code again":
         // treat it as activity so the video does not resume under the user's cursor.
-        if (video.owner === 'codealong' && this.idleDeadline !== null) {
-          this.idleDeadline = Math.max(this.idleDeadline, now + this.settings.idleDelayMs);
-        }
+        if (video.owner === 'codealong' && this.idleDeadline !== null) this.scheduleIdle(now);
         break;
       case 'ended':
         this.log('VIDEO_ENDED');
@@ -276,7 +318,7 @@ export class HubCore {
       // browser was disconnected): give the user one more idle period, then resume.
       const nothingScheduled = this.idleDeadline === null && this.saveResumeAt === null && !this.pending;
       if (!this.coding && nothingScheduled && this.settings.enabled && this.settings.resumeOnIdle) {
-        this.idleDeadline = now + this.settings.idleDelayMs;
+        this.scheduleIdle(now);
       }
     }
   }
@@ -309,7 +351,7 @@ export class HubCore {
       this.suppressAutoPause = false;
       this.log('TYPING_STARTED');
     }
-    this.idleDeadline = now + this.settings.idleDelayMs;
+    this.scheduleIdle(now);
     if (this.saveResumeAt !== null) {
       this.saveResumeAt = null;
       this.log('SAVE_RESUME_CANCELLED', 'typing continued after save');

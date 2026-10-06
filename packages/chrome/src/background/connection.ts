@@ -3,7 +3,9 @@ import {
   parseHubMessage,
   type BrowserToHub,
   type CommandMessage,
+  type HubFeature,
   type HubStatus,
+  type SharedSettings,
 } from '@codealong/protocol';
 import type { ConnectionState } from '../shared/messages';
 
@@ -23,6 +25,8 @@ export interface ConnectionEvents {
   onDisconnected(wasConnected: boolean): void;
   onCommand(cmd: CommandMessage): void;
   onStatus(status: HubStatus): void;
+  /** VS Code asked to change a setting (e.g. "turn off" from its status bar). */
+  onUpdateSettings?(patch: Partial<SharedSettings>): void;
   log(event: string, detail?: string): void;
 }
 
@@ -58,6 +62,8 @@ export class HubConnection {
   lastError: string | null = null;
   /** The hub rejected us for speaking another protocol version (one extension needs an update). */
   incompatible = false;
+  /** What the connected hub told us about itself (version, optional features). */
+  hub: { version: string | null; features: readonly HubFeature[] } | null = null;
 
   constructor(
     /** Candidate hub URLs (one per port in HUB_PORTS), tried in turn. */
@@ -168,6 +174,7 @@ export class HubConnection {
         this.triedThisRound = 0;
         this.lastError = null;
         this.incompatible = false;
+        this.hub = { version: msg.version ?? null, features: msg.features ?? [] };
         this.state = 'connected';
         if (this.handshakeTimer) clearTimeout(this.handshakeTimer);
         this.handshakeTimer = null;
@@ -197,6 +204,9 @@ export class HubConnection {
       case 'status':
         this.events.onStatus(msg.status);
         break;
+      case 'updateSettings':
+        this.events.onUpdateSettings?.(msg.patch);
+        break;
       case 'error':
         this.lastError = msg.message;
         this.events.log('HUB_ERROR', msg.message);
@@ -215,6 +225,7 @@ export class HubConnection {
     this.watchdogTimer = null;
     if (this.socket === socket) this.socket = null;
     this.welcomed = false;
+    this.hub = null;
   }
 
   private scheduleReconnect(): void {

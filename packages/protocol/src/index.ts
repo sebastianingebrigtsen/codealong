@@ -89,6 +89,86 @@ export interface TutorialInfo {
 }
 
 // ---------------------------------------------------------------------------
+// Settings (owned and stored by the Chrome extension, applied by the hub)
+// ---------------------------------------------------------------------------
+
+/**
+ * How CodeAlong behaves. The Chrome extension stores these (chrome.storage.local) and sends them
+ * to the hub whenever it connects or the user changes something; the hub never persists them.
+ * Chrome owns them because they only matter while Chrome is connected, Chrome is the side that
+ * always (re)connects, and its popup is where users look for them.
+ */
+export interface SharedSettings {
+  /** Master switch for automatic pausing and resuming. Manual shortcuts always work. */
+  enabled: boolean;
+  resumeOnIdle: boolean;
+  idleDelaySeconds: number;
+  resumeOnSave: boolean;
+  rewindBeforeResume: boolean;
+  rewindSeconds: number;
+  /** Continue when the tutorial tab gets focus again (handy on a single screen). */
+  resumeOnFocus: boolean;
+}
+
+export const DEFAULT_SHARED_SETTINGS: Readonly<SharedSettings> = Object.freeze({
+  enabled: true,
+  resumeOnIdle: true,
+  idleDelaySeconds: 5,
+  resumeOnSave: true,
+  rewindBeforeResume: true,
+  rewindSeconds: 2,
+  resumeOnFocus: false,
+});
+
+export const SETTING_LIMITS = Object.freeze({
+  idleDelaySeconds: { min: 1, max: 30 },
+  rewindSeconds: { min: 1, max: 15 },
+});
+
+/**
+ * Turns anything (stored data from an older version, a message from the wire, a partial patch
+ * merged onto the current settings) into valid settings: unknown fields are dropped, wrong types
+ * fall back to the default, numbers are rounded and clamped. Never throws.
+ */
+export function sanitizeSettings(value: unknown, base: SharedSettings = DEFAULT_SHARED_SETTINGS): SharedSettings {
+  const v = isObject(value) ? value : {};
+  const bool = (key: keyof SharedSettings): boolean =>
+    typeof v[key] === 'boolean' ? (v[key] as boolean) : (base[key] as boolean);
+  const num = (key: 'idleDelaySeconds' | 'rewindSeconds'): number => {
+    const { min, max } = SETTING_LIMITS[key];
+    const raw = v[key];
+    return isFiniteNumber(raw) ? Math.min(max, Math.max(min, Math.round(raw))) : base[key];
+  };
+  return {
+    enabled: bool('enabled'),
+    resumeOnIdle: bool('resumeOnIdle'),
+    idleDelaySeconds: num('idleDelaySeconds'),
+    resumeOnSave: bool('resumeOnSave'),
+    rewindBeforeResume: bool('rewindBeforeResume'),
+    rewindSeconds: num('rewindSeconds'),
+    resumeOnFocus: bool('resumeOnFocus'),
+  };
+}
+
+/** One-line, human summary of when CodeAlong continues, e.g. "Continues 5 s after you stop typing or save · rewinds 2 s". */
+export function describeSettings(s: SharedSettings): string {
+  if (!s.enabled) return 'Automatic pausing is off';
+  const when: string[] = [];
+  if (s.resumeOnIdle) when.push(`${s.idleDelaySeconds}\u00a0s after you stop typing`);
+  if (s.resumeOnSave) when.push('when you save');
+  if (s.resumeOnFocus) when.push('when you switch back to the tutorial');
+  const head = when.length ? `Continues ${joinOr(when)}` : 'Continues only when you say so';
+  return s.rewindBeforeResume ? `${head} · rewinds ${s.rewindSeconds}\u00a0s` : head;
+}
+
+function joinOr(parts: string[]): string {
+  return parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} or ${parts.at(-1)}`;
+}
+
+/** Capabilities a hub advertises in its welcome message (absent = an older hub). */
+export type HubFeature = 'settings';
+
+// ---------------------------------------------------------------------------
 // Messages
 // ---------------------------------------------------------------------------
 
@@ -113,6 +193,10 @@ export interface WelcomeMessage {
   type: 'welcome';
   protocol: number;
   hub: string;
+  /** Version of the CodeAlong VS Code extension (absent before 0.2.0). */
+  version?: string;
+  /** Optional capabilities; additive so older and newer extensions keep working together. */
+  features?: HubFeature[];
 }
 
 export interface ErrorMessage {
@@ -147,6 +231,11 @@ export interface BrowserControlMessage {
   type: 'control';
   action: ControlAction;
 }
+/** The browser's current settings; sent after connecting and whenever they change. */
+export interface SettingsMessage {
+  type: 'settings';
+  settings: SharedSettings;
+}
 
 // Hub -> browser
 export type VideoCommand =
@@ -161,7 +250,12 @@ export type VideoCommand =
    */
   | { command: 'userToggle' }
   /** Explicit user action ("I'm done" while the user had paused): play without rewind. */
-  | { command: 'userPlay' };
+  | { command: 'userPlay' }
+  /**
+   * CodeAlong was turned off while it had the video paused: hand that pause over to the user, so
+   * turning CodeAlong back on later never starts the video by surprise.
+   */
+  | { command: 'release'; pauseId: string };
 
 export type CommandMessage = { type: 'command'; id: number } & VideoCommand;
 
@@ -170,13 +264,19 @@ export interface HubStatusMessage {
   status: HubStatus;
 }
 
+/** Ask the browser (which owns the settings) to change some of them, e.g. "turn off" from VS Code. */
+export interface UpdateSettingsMessage {
+  type: 'updateSettings';
+  patch: Partial<SharedSettings>;
+}
+
 // Editor follower -> hub
 export type ActivityKind = 'edit' | 'save';
 export interface ActivityMessage {
   type: 'activity';
   kind: ActivityKind;
 }
-export type ControlAction = 'toggle' | 'done';
+export type ControlAction = 'toggle' | 'done' | 'toggleEnabled';
 export interface EditorControlMessage {
   type: 'control';
   action: ControlAction;
@@ -190,6 +290,8 @@ export interface HubStatus {
   tutorialTitle: string | null;
   /** Epoch ms at which an automatic resume is expected, if one is scheduled. */
   resumeAt: number | null;
+  /** Settings in effect (null until a browser has sent them, or from a hub older than 0.2.0). */
+  settings: SharedSettings | null;
 }
 
 export type StatusPhase =
@@ -205,11 +307,19 @@ export type StatusPhase =
   | 'ended';
 
 export type BrowserToHub =
-  HelloMessage | PongMessage | PingMessage | TutorialMessage | VideoMessage | FocusMessage | BrowserControlMessage;
+  | HelloMessage
+  | PongMessage
+  | PingMessage
+  | TutorialMessage
+  | VideoMessage
+  | FocusMessage
+  | BrowserControlMessage
+  | SettingsMessage;
 
 export type EditorToHub = HelloMessage | PongMessage | PingMessage | ActivityMessage | EditorControlMessage;
 
-export type HubToClient = WelcomeMessage | ErrorMessage | PingMessage | PongMessage | CommandMessage | HubStatusMessage;
+export type HubToClient =
+  WelcomeMessage | ErrorMessage | PingMessage | PongMessage | CommandMessage | HubStatusMessage | UpdateSettingsMessage;
 
 // ---------------------------------------------------------------------------
 // Validation (never trust the wire)
@@ -240,7 +350,7 @@ const VIDEO_CAUSES: readonly VideoCause[] = [
   'source-changed',
   'command-failed',
 ];
-const CONTROL_ACTIONS: readonly ControlAction[] = ['toggle', 'done'];
+const CONTROL_ACTIONS: readonly ControlAction[] = ['toggle', 'done', 'toggleEnabled'];
 
 export function parseVideoState(v: unknown): VideoState | null {
   if (!isObject(v)) return null;
@@ -302,9 +412,24 @@ export function parseBrowserMessage(raw: string): BrowserToHub | null {
       return CONTROL_ACTIONS.includes(m.action as ControlAction)
         ? { type: 'control', action: m.action as ControlAction }
         : null;
+    case 'settings':
+      return isObject(m.settings) ? { type: 'settings', settings: sanitizeSettings(m.settings) } : null;
     default:
       return null;
   }
+}
+
+/** Validates a settings patch: only known keys with the right type survive. */
+export function parseSettingsPatch(v: unknown): Partial<SharedSettings> | null {
+  if (!isObject(v)) return null;
+  const full = sanitizeSettings(v);
+  const patch: Partial<SharedSettings> = {};
+  for (const key of Object.keys(DEFAULT_SHARED_SETTINGS) as (keyof SharedSettings)[]) {
+    if (key in v && typeof v[key] === typeof DEFAULT_SHARED_SETTINGS[key]) {
+      (patch as Record<string, unknown>)[key] = full[key];
+    }
+  }
+  return Object.keys(patch).length ? patch : null;
 }
 
 export function parseEditorMessage(raw: string): EditorToHub | null {
@@ -352,17 +477,30 @@ function parseHubStatus(v: unknown): HubStatus | null {
     browserConnected: v.browserConnected,
     tutorialTitle: v.tutorialTitle as string | null,
     resumeAt: v.resumeAt as number | null,
+    // Absent from hubs older than 0.2.0.
+    settings: isObject(v.settings) ? sanitizeSettings(v.settings) : null,
   };
 }
+
+const HUB_FEATURES: readonly HubFeature[] = ['settings'];
 
 export function parseHubMessage(raw: string): HubToClient | null {
   const m = safeJson(raw);
   if (!m) return null;
   switch (m.type) {
-    case 'welcome':
-      return isFiniteNumber(m.protocol) && isShortString(m.hub, 128)
-        ? { type: 'welcome', protocol: m.protocol, hub: m.hub }
-        : null;
+    case 'welcome': {
+      if (!isFiniteNumber(m.protocol) || !isShortString(m.hub, 128)) return null;
+      const welcome: WelcomeMessage = { type: 'welcome', protocol: m.protocol, hub: m.hub };
+      if (isShortString(m.version, 32)) welcome.version = m.version;
+      if (Array.isArray(m.features)) {
+        welcome.features = m.features.filter((f): f is HubFeature => HUB_FEATURES.includes(f as HubFeature));
+      }
+      return welcome;
+    }
+    case 'updateSettings': {
+      const patch = parseSettingsPatch(m.patch);
+      return patch ? { type: 'updateSettings', patch } : null;
+    }
     case 'error':
       return isShortString(m.code, 64) && isShortString(m.message, 1024)
         ? { type: 'error', code: m.code as ErrorMessage['code'], message: m.message }
@@ -388,6 +526,10 @@ export function parseHubMessage(raw: string): HubToClient | null {
         case 'userToggle':
         case 'userPlay':
           return { type: 'command', id: m.id, command: m.command };
+        case 'release':
+          return isShortString(m.pauseId, 64)
+            ? { type: 'command', id: m.id, command: 'release', pauseId: m.pauseId }
+            : null;
         default:
           return null;
       }

@@ -11,7 +11,14 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
-import { DEV_CHROME_EXTENSION_ID, type HubStatus, type VideoCommand } from '@codealong/protocol';
+import {
+  DEFAULT_SHARED_SETTINGS,
+  DEV_CHROME_EXTENSION_ID,
+  PROTOCOL_VERSION,
+  type HubStatus,
+  type SharedSettings,
+  type VideoCommand,
+} from '@codealong/protocol';
 import { HubConnection, type SocketLike } from '../packages/chrome/src/background/connection';
 import { probeHub } from '../packages/chrome/src/background/probe';
 import { VideoController } from '../packages/chrome/src/content/videoController';
@@ -51,7 +58,8 @@ function startNode(port: number | number[], token: string, settings: Partial<Cor
       ports: Array.isArray(port) ? port : [port],
       editorToken: token,
       allowedOrigins: () => [`chrome-extension://${DEV_CHROME_EXTENSION_ID}`],
-      settings: () => ({ ...DEFAULT_SETTINGS, idleDelayMs: IDLE_MS, ...settings }),
+      version: 'test',
+      initialSettings: { ...DEFAULT_SETTINGS, idleDelayMs: IDLE_MS, ...settings },
     },
     {
       onStatus: (s) => {
@@ -66,8 +74,19 @@ function startNode(port: number | number[], token: string, settings: Partial<Cor
   return { node, events, status: () => status };
 }
 
-/** The Chrome side: service-worker connection + content-script controller on a fake video. */
-function startBrowser(port: number | number[]) {
+/**
+ * The Chrome side: service-worker connection + content-script controller on a fake video.
+ * With `settings`, it behaves like the 0.2 service worker: sends its settings to hubs that support
+ * them and applies change requests coming from VS Code.
+ */
+function startBrowser(port: number | number[], settings?: SharedSettings) {
+  const prefs = { settings: settings ? { ...settings } : null, sent: [] as SharedSettings[] };
+  const sendSettings = () => {
+    if (prefs.settings && connection.hub?.features.includes('settings')) {
+      prefs.sent.push({ ...prefs.settings });
+      connection.send({ type: 'settings', settings: prefs.settings });
+    }
+  };
   const video = new FakeVideo();
   video.currentTime = 30;
   void video.play();
@@ -79,6 +98,7 @@ function startBrowser(port: number | number[]) {
     () => (Array.isArray(port) ? port : [port]).map((p) => `ws://127.0.0.1:${p}`),
     {
       onConnected: () => {
+        sendSettings();
         connection.send({ type: 'tutorial', tutorial: { tabId: 1, title: 'Tutorial', host: 'youtube.com' } });
         connection.send({ type: 'video', video: holder.controller!.state(), cause: 'sync' });
       },
@@ -89,6 +109,11 @@ function startBrowser(port: number | number[]) {
         holder.controller!.handle(command);
       },
       onStatus: () => undefined,
+      onUpdateSettings: (patch) => {
+        if (!prefs.settings) return;
+        prefs.settings = { ...prefs.settings, ...patch };
+        sendSettings();
+      },
       log: () => undefined,
     },
     (url) =>
@@ -106,7 +131,7 @@ function startBrowser(port: number | number[]) {
     connection.stop();
     controller.detach();
   });
-  return { video, controller, connection, commands };
+  return { video, controller, connection, commands, prefs };
 }
 
 function tempTokenDir(): string {
@@ -263,5 +288,76 @@ describe('full loop', () => {
     );
     cleanups.push(() => new Promise<void>((r) => old.close(() => r())));
     expect(await probeHub([`ws://127.0.0.1:${port}`])).toBe('incompatible');
+  });
+
+  describe('settings owned by Chrome', () => {
+    const custom: SharedSettings = { ...DEFAULT_SHARED_SETTINGS, idleDelaySeconds: 1, rewindSeconds: 5 };
+
+    it('reach VS Code on connect and decide the timing and the rewind', async () => {
+      const port = await freePort();
+      // VS Code would wait 60 s on its own: only the browser's 1 s can make this pass in time.
+      const hub = startNode(port, loadOrCreateEditorToken(tempTokenDir()), { idleDelayMs: 60_000 });
+      const browser = startBrowser(port, custom);
+      await waitFor(() => hub.status()?.settings?.idleDelaySeconds === 1, 'hub uses the browser settings');
+      expect(hub.status()?.settings).toEqual(custom);
+
+      hub.node.activity('edit');
+      await waitFor(() => browser.video.paused, 'paused');
+      const pausedAt = Date.now();
+      await waitFor(() => !browser.video.paused, 'resumed after the browser-configured idle delay', 5_000);
+      expect(Date.now() - pausedAt).toBeGreaterThanOrEqual(900);
+      expect(browser.video.currentTime).toBe(25); // rewound 5 s
+    });
+
+    it('"turn off" in VS Code is stored by Chrome and comes back as a setting', async () => {
+      const port = await freePort();
+      const hub = startNode(port, loadOrCreateEditorToken(tempTokenDir()));
+      const browser = startBrowser(port, custom);
+      await waitFor(() => hub.status()?.phase === 'playing', 'connected');
+
+      hub.node.control('toggleEnabled');
+      await waitFor(() => browser.prefs.settings?.enabled === false, 'Chrome stored the change');
+      await waitFor(() => hub.status()?.phase === 'disabled', 'VS Code applied it');
+      hub.node.activity('edit');
+      await new Promise((r) => setTimeout(r, 300));
+      expect(browser.video.paused).toBe(false);
+
+      hub.node.control('toggleEnabled');
+      await waitFor(() => hub.status()?.phase === 'playing', 'back on');
+    });
+
+    it('are sent again after VS Code restarts, so a new hub uses them immediately', async () => {
+      const port = await freePort();
+      const token = loadOrCreateEditorToken(tempTokenDir());
+      const first = startNode(port, token);
+      const browser = startBrowser(port, custom);
+      await waitFor(() => first.status()?.settings?.rewindSeconds === 5, 'first hub has the settings');
+      await first.node.stop();
+
+      const second = startNode(port, token);
+      await waitFor(() => second.status()?.settings?.rewindSeconds === 5, 'restarted hub has them too', 8_000);
+      expect(browser.prefs.sent.length).toBeGreaterThanOrEqual(2);
+    }, 12_000);
+
+    it('are not sent to an older VS Code extension, which keeps working on its own', async () => {
+      const port = await freePort();
+      const received: string[] = [];
+      const old = new WebSocketServer({ host: '127.0.0.1', port });
+      old.on('connection', (sock) => {
+        sock.on('message', (data) => {
+          const msg = JSON.parse(String(data)) as { type: string };
+          received.push(msg.type);
+          // A 0.1.0 hub's welcome has no version or features.
+          if (msg.type === 'hello')
+            sock.send(JSON.stringify({ type: 'welcome', protocol: PROTOCOL_VERSION, hub: 'vscode' }));
+        });
+      });
+      cleanups.push(() => new Promise<void>((r) => old.close(() => r())));
+      const browser = startBrowser(port, custom);
+      await waitFor(() => browser.connection.connected, 'connected to the old hub');
+      await waitFor(() => received.includes('tutorial'), 'tutorial sent');
+      expect(received).not.toContain('settings');
+      expect(browser.connection.hub).toEqual({ version: null, features: [] });
+    });
   });
 });

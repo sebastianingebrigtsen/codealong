@@ -7,6 +7,8 @@
 <p align="center"><strong>Coding tutorials that wait for you.</strong></p>
 
 <p align="center">
+  <a href="https://chromewebstore.google.com/detail/codealong/jhfmljdjpeaclncddhhifegcknjgfjij"><img src="https://img.shields.io/chrome-web-store/v/jhfmljdjpeaclncddhhifegcknjgfjij?label=Chrome%20Web%20Store" alt="Chrome Web Store"></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=SebastianIngebrigtsen.codealong"><img src="https://vsmarketplacebadges.dev/version-short/SebastianIngebrigtsen.codealong.svg" alt="VS Code Marketplace"></a>
   <a href="https://github.com/sebastianingebrigtsen/codealong/actions/workflows/ci.yml"><img src="https://github.com/sebastianingebrigtsen/codealong/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
 </p>
@@ -20,27 +22,14 @@ on the keyboard.
 
 ![CodeAlong pauses the tutorial while you code](assets/store/chrome-screenshot-1280x800.png)
 
-## Features
+## Install
 
-- **Pauses when you start typing** in VS Code, once per burst of typing.
-- **Continues when you're done**: after a few seconds without typing, when you save, or when you say so.
-- **Rewinds a little** before continuing, so you don't miss the end of a sentence.
-- **Never overrides you.** If you pause the video yourself, CodeAlong will not start it again.
-- **Works across two screens**: no clicking back and forth between windows.
-- **Private by design**: everything stays on your computer. No account, no cloud, no analytics.
-  Your code is never read or sent anywhere.
+CodeAlong has two small parts that work together. Install both:
 
-## Installation
+1. **[CodeAlong for Chrome](https://chromewebstore.google.com/detail/codealong/jhfmljdjpeaclncddhhifegcknjgfjij)**: finds the video and pauses or plays it.
+2. **[CodeAlong for VS Code](https://marketplace.visualstudio.com/items?itemName=SebastianIngebrigtsen.codealong)**: notices _that_ you are coding (never _what_).
 
-CodeAlong has two small parts that work together: one for Chrome (controls the video) and one for
-VS Code (notices that you are coding). Install both:
-
-|             |                                                                                                                  |
-| ----------- | ---------------------------------------------------------------------------------------------------------------- |
-| **Chrome**  | Chrome Web Store: _coming soon_ <!-- TODO(release): link the Chrome Web Store listing -->                        |
-| **VS Code** | [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=SebastianIngebrigtsen.codealong) |
-
-Until the Chrome Web Store listing is live, you can [build the Chrome extension from source](#building-from-source).
+They find each other automatically. There is nothing to configure, no account and no cloud.
 
 ## Getting started
 
@@ -49,9 +38,9 @@ Until the Chrome Web Store listing is live, you can [build the Chrome extension 
    **Follow this tab**.
 3. Start the video and code along in VS Code.
 
-The toolbar icon shows **ON** when Chrome and VS Code are connected. The VS Code status bar shows
-what CodeAlong is doing: **CodeAlong: Tutorial Playing**, **CodeAlong: Coding... (resume in 3s)** and so on.
-Both parts find each other automatically. There is nothing to configure.
+The toolbar icon shows **ON** when Chrome and VS Code are connected. While the video is paused, a
+small label on it shows why and counts down before it continues. The VS Code status bar shows the
+same: **CodeAlong: Tutorial Playing**, **CodeAlong: Coding... (resume in 3s)** and so on.
 
 ### When does it pause and continue?
 
@@ -64,6 +53,27 @@ Both parts find each other automatically. There is nothing to configure.
 | press play while you're still typing                  | lets it play until you stop                    |
 | scrub through the video while CodeAlong has it paused | waits, and doesn't rewind your chosen position |
 
+All of these timings can be changed.
+
+## Settings
+
+Click the CodeAlong icon in Chrome and open **Settings**. Changes apply in VS Code right away.
+
+![CodeAlong settings](assets/store/chrome-screenshot-settings-1280x800.png)
+
+| Setting                           | Default       | What it does                                                        |
+| --------------------------------- | ------------- | ------------------------------------------------------------------- |
+| Automatic pausing (header switch) | on            | Turn CodeAlong off for a while. The shortcuts keep working.         |
+| Continue after I stop typing      | on, after 5 s | How long CodeAlong waits after your last keystroke (1–30 s).        |
+| Continue when I save              | on            | A manual save counts as "done". Auto save is ignored.               |
+| Rewind before continuing          | on, by 2 s    | So you hear the end of the instructor's sentence again (1–15 s).    |
+| Continue when I return to the tab | off           | Handy on a single screen: switching back to the video continues it. |
+| Show status on the video          | on            | The "Paused while you code" label and countdown on the video.       |
+
+**Reset to defaults** is at the bottom of the section. In VS Code, click **CodeAlong** in the status
+bar to turn automatic pausing on or off from the editor. The only VS Code setting is
+`codealong.debugLogging`, for troubleshooting.
+
 ### Keyboard shortcuts
 
 | Action                     | VS Code                    | Chrome        |
@@ -72,24 +82,6 @@ Both parts find each other automatically. There is nothing to configure.
 | I'm done, continue now     | `Ctrl+Alt+D` (macOS `⌃⌥D`) | `Alt+Shift+D` |
 
 Change them in VS Code under _Keyboard Shortcuts_ and in Chrome at `chrome://extensions/shortcuts`.
-To turn CodeAlong off for a while, click **CodeAlong** in the VS Code status bar, or use the switch
-in the Chrome popup.
-
-### Settings
-
-All settings live in VS Code (_Settings_ → search for "CodeAlong"):
-
-| Setting                           | Default | Description                                                                             |
-| --------------------------------- | ------- | --------------------------------------------------------------------------------------- |
-| `codealong.enabled`               | `true`  | Turn automatic pausing and resuming on or off.                                          |
-| `codealong.pauseOnTyping`         | `true`  | Pause when you start editing code.                                                      |
-| `codealong.resumeAfterIdle`       | `true`  | Continue when you've stopped typing.                                                    |
-| `codealong.idleDelaySeconds`      | `5`     | Seconds without typing that count as "done".                                            |
-| `codealong.resumeOnSave`          | `true`  | Saving a file counts as "done" (auto save is ignored).                                  |
-| `codealong.resumeOnTutorialFocus` | `false` | Continue when you switch back to the tutorial tab. Handy on one screen.                 |
-| `codealong.rewindBeforeResume`    | `true`  | Rewind before continuing automatically.                                                 |
-| `codealong.rewindSeconds`         | `2`     | How far to rewind.                                                                      |
-| `codealong.debugLogging`          | `false` | Log events to the _CodeAlong_ output channel for troubleshooting. Code is never logged. |
 
 ## Supported platforms
 
@@ -108,9 +100,9 @@ tested. Firefox, Safari and other editors are not supported.
 CodeAlong runs entirely on your computer. The VS Code extension tells the Chrome extension only
 _that_ you typed or saved, never _what_. It doesn't read, store or transmit your code, it doesn't
 record keystrokes, and it has no analytics or remote servers. The two extensions talk over a local
-connection (`127.0.0.1`) that websites cannot use.
+connection (`127.0.0.1`) that websites cannot use. Your settings are stored locally in Chrome.
 
-Details: [Privacy policy](docs/PRIVACY.md) · [Security](SECURITY.md)
+[Privacy policy](https://sebastianingebrigtsen.github.io/codealong/PRIVACY.html) · [Security](SECURITY.md)
 
 ## Known limitations
 
@@ -118,9 +110,9 @@ Details: [Privacy policy](docs/PRIVACY.md) · [Security](SECURITY.md)
   video in a _closed_ shadow root are not detected.
 - On sites other than YouTube, Vimeo and Laracasts, Chrome asks for permission once per site. A
   video in a cross-origin iframe on such a site (other than a YouTube or Vimeo embed) is not detected.
-- "Done" is a heuristic. If you pause to think for longer than the idle delay, the video continues.
-  Raise `codealong.idleDelaySeconds`, or turn off `codealong.resumeAfterIdle` and continue by saving
-  or with the shortcut.
+- "Done" is a guess. If you pause to think for longer than the idle delay, the video continues.
+  Raise the delay, or turn off "Continue after I stop typing" and continue by saving or with the
+  shortcut.
 - Typing in any file counts; CodeAlong doesn't know which files belong to the tutorial.
 - The Chrome shortcuts only work while Chrome has focus. Use the VS Code shortcuts while coding.
 - While the integrated terminal has focus, VS Code passes the shortcuts to the shell instead.
@@ -130,20 +122,17 @@ Details: [Privacy policy](docs/PRIVACY.md) · [Security](SECURITY.md)
 ```
 Chrome extension             local connection (127.0.0.1)            VS Code extension
 finds & controls the video   ◄────── typing / save signals ───────   notices that you code,
-knows who paused it          ─────── video state ────────────────►   decides when to pause/play
+knows who paused it          ─────── video state, settings ──────►   decides when to pause/play
+stores your settings
 ```
 
 The VS Code extension holds a small state machine that decides _when_ to pause and play. The Chrome
-extension knows _who_ paused the video and refuses to resume anything the user paused. Read
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the details and the invariants.
+extension knows _who_ paused the video, refuses to resume anything the user paused, and owns the
+settings. Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the details and the invariants.
 
 ## Contributing
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-### Building from source
-
-Requires Node.js 22+, Chrome and VS Code.
+Bug reports, ideas and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
 git clone https://github.com/sebastianingebrigtsen/codealong.git
@@ -152,19 +141,17 @@ npm install
 npm run dev        # builds both extensions and rebuilds on change
 ```
 
-- **Chrome:** open `chrome://extensions`, enable _Developer mode_, click _Load unpacked_ and select
-  `packages/chrome/dist`.
-- **VS Code:** open the repository in VS Code and press F5 (_Run CodeAlong_). Or build an installable
-  package with `npm run package -- --allow-dev-id` and choose _Extensions → … → Install from VSIX_ →
-  `dist/codealong-vscode-<version>.vsix`.
+Load `packages/chrome/dist` as an unpacked extension in Chrome (_Developer mode_ on
+`chrome://extensions`), and press F5 in VS Code to run the editor extension. `npm run check` runs
+formatting, lint, typecheck, tests and the build.
 
 ## Roadmap
 
-CodeAlong is in early development (0.x). Under consideration, not promised:
+CodeAlong is young (0.x) and deliberately small. Under consideration, not promised:
 
-- Chrome Web Store release
 - Verified support for more video sites and Chromium-based browsers
 - Only counting typing inside the tutorial's project folder
+- Manual verification on Windows and Linux
 
 Have an idea? [Open a feature request](https://github.com/sebastianingebrigtsen/codealong/issues/new/choose).
 

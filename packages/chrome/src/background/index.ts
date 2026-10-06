@@ -15,6 +15,14 @@ import type {
   ProbeResult,
   ToAgent,
 } from '../shared/messages';
+import {
+  DEFAULT_CHROME_SETTINGS,
+  LEGACY_STORAGE_KEY,
+  STORAGE_KEY,
+  applySettingsPatch,
+  readStoredSettings,
+  type ChromeSettings,
+} from '../shared/settings';
 import { HubConnection } from './connection';
 import { FrameTracker } from './frames';
 import { isStaticallyCovered } from './hosts';
@@ -26,15 +34,12 @@ import { probeHub } from './probe';
  *  - the local connection to VS Code (only while a tutorial is active)
  *  - routing: hub commands -> the frame that holds the tutorial video, video reports -> hub
  *  - tutorial focus signal, keyboard shortcuts, badge
+ *  - the user's settings: stored here and sent to VS Code, which applies them
  *
  * All listeners are registered synchronously at top level (MV3 requirement); each one awaits
  * `ready` before touching state.
  */
 
-interface Settings {
-  enabled: boolean;
-  debug: boolean;
-}
 interface ActiveTutorial {
   tabId: number;
   windowId: number;
@@ -49,7 +54,9 @@ const LOG_LIMIT = 40;
 declare const __CODEALONG_TEST_PORTS__: string;
 const HUB_URLS = (parsePortList(__CODEALONG_TEST_PORTS__) ?? HUB_PORTS).map((port) => `ws://127.0.0.1:${port}`);
 
-let settings: Settings = { enabled: true, debug: false };
+let settings: ChromeSettings = structuredClone(DEFAULT_CHROME_SETTINGS);
+/** Frame that currently shows the on-video status label, so it can be cleared when that changes. */
+let overlayFrameId: number | null = null;
 let active: ActiveTutorial | null = null;
 let hubStatus: HubStatus | null = null;
 let lastFocusSent: boolean | null = null;
@@ -60,6 +67,7 @@ const recentLog: string[] = [];
 const connection = new HubConnection(() => HUB_URLS, {
   onConnected() {
     lastFocusSent = null;
+    sendSettingsToHub();
     sendTutorialToHub();
     forwardPrimary('sync');
     void updateFocus();
@@ -69,11 +77,17 @@ const connection = new HubConnection(() => HUB_URLS, {
   onDisconnected() {
     hubStatus = null;
     updateBadge();
+    void updateOverlay();
   },
   onCommand: (cmd) => void routeCommand(cmd),
   onStatus(status) {
     hubStatus = status;
     updateBadge();
+    void updateOverlay();
+  },
+  onUpdateSettings(patch) {
+    log('SETTINGS_CHANGED_IN_VSCODE');
+    void updateSettings(patch);
   },
   log,
 });
@@ -81,12 +95,13 @@ const connection = new HubConnection(() => HUB_URLS, {
 const ready = init();
 
 async function init(): Promise<void> {
-  const stored = await chrome.storage.local.get(['settings', 'active']);
-  const saved = (stored.settings ?? {}) as Partial<Settings>;
-  settings = {
-    enabled: typeof saved.enabled === 'boolean' ? saved.enabled : settings.enabled,
-    debug: typeof saved.debug === 'boolean' ? saved.debug : settings.debug,
-  };
+  const stored = await chrome.storage.local.get([STORAGE_KEY, LEGACY_STORAGE_KEY, 'active']);
+  settings = readStoredSettings(stored);
+  if (stored[LEGACY_STORAGE_KEY] !== undefined) {
+    // Migrate the 0.1.0 format once.
+    await chrome.storage.local.set({ [STORAGE_KEY]: settings });
+    await chrome.storage.local.remove(LEGACY_STORAGE_KEY);
+  }
   const candidate = stored.active as ActiveTutorial | undefined;
   // storage.session survives service-worker restarts but not extension reloads.
   const { workerStarted } = await chrome.storage.session.get('workerStarted');
@@ -182,7 +197,9 @@ async function tabStillMatches(t: ActiveTutorial): Promise<boolean> {
 // Connection & routing
 
 function syncConnection(): void {
-  if (settings.enabled && active) {
+  // Connected whenever a tutorial is followed, even while automatic pausing is turned off: the
+  // shortcuts, the status and the on/off switch in VS Code keep working.
+  if (active) {
     connection.ensure();
     void chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.5 });
   } else {
@@ -191,6 +208,47 @@ function syncConnection(): void {
     void chrome.alarms.clear(KEEPALIVE_ALARM);
   }
   updateBadge();
+}
+
+function sendSettingsToHub(): void {
+  // Hubs older than 0.2.0 don't know settings; they keep using their own VS Code settings.
+  if (connection.hub?.features.includes('settings')) connection.send({ type: 'settings', settings: settings.shared });
+}
+
+async function updateSettings(patch: unknown): Promise<ChromeSettings> {
+  const next = applySettingsPatch(settings, patch);
+  const sharedChanged = JSON.stringify(next.shared) !== JSON.stringify(settings.shared);
+  const debugChanged = next.debug !== settings.debug;
+  settings = next;
+  await chrome.storage.local.set({ [STORAGE_KEY]: settings });
+  if (sharedChanged) {
+    log('SETTINGS_SAVED');
+    sendSettingsToHub();
+  }
+  if (debugChanged) await broadcastToTab({ type: 'agent:activate', debug: settings.debug });
+  updateBadge();
+  await updateOverlay();
+  return settings;
+}
+
+/** Shows (or clears) the small status label on the tutorial video, in the frame that holds it. */
+async function updateOverlay(): Promise<void> {
+  if (!active) return;
+  const frameId = frames.primaryFrameId();
+  const show = settings.showOverlay && connection.connected && hubStatus !== null;
+  const overlay =
+    show && hubStatus ? { phase: hubStatus.phase, resumeAt: hubStatus.resumeAt, settings: settings.shared } : null;
+  const tabId = active.tabId;
+  if (overlayFrameId !== null && overlayFrameId !== frameId) {
+    await chrome.tabs
+      .sendMessage(tabId, { type: 'agent:overlay', overlay: null } satisfies ToAgent, { frameId: overlayFrameId })
+      .catch(() => undefined);
+  }
+  overlayFrameId = frameId;
+  if (frameId === null) return;
+  await chrome.tabs
+    .sendMessage(tabId, { type: 'agent:overlay', overlay } satisfies ToAgent, { frameId })
+    .catch(() => undefined);
 }
 
 function sendTutorialToHub(): void {
@@ -239,6 +297,7 @@ function onAgentReport(frameId: number, report: AgentVideoReport): void {
   }
   if (report.cause !== 'sync') log(`VIDEO_${report.cause.toUpperCase().replace(/-/g, '_')}`);
   updateBadge();
+  if (after !== before) void updateOverlay();
 }
 
 async function control(action: 'toggle' | 'done'): Promise<void> {
@@ -283,9 +342,12 @@ function noVideo(): VideoState {
 
 function popupStatus(): PopupStatus {
   return {
-    enabled: settings.enabled,
-    debug: settings.debug,
-    connection: active && settings.enabled ? connection.state : 'off',
+    settings,
+    defaults: DEFAULT_CHROME_SETTINGS,
+    extensionVersion: chrome.runtime.getManifest().version,
+    hubVersion: connection.hub?.version ?? null,
+    hubSupportsSettings: connection.hub ? connection.hub.features.includes('settings') : null,
+    connection: active ? connection.state : 'off',
     incompatible: connection.incompatible,
     tutorial: active ? { tabId: active.tabId, title: active.title, host: active.host } : null,
     video: frames.primaryState(),
@@ -297,10 +359,10 @@ function popupStatus(): PopupStatus {
 function updateBadge(): void {
   let text = '';
   let color = '#6b7280';
-  if (settings.enabled && active) {
+  if (active) {
     if (!connection.connected) {
       text = '…';
-    } else if (hubStatus?.phase === 'disabled') {
+    } else if (!settings.shared.enabled || hubStatus?.phase === 'disabled') {
       text = 'OFF';
     } else if (hubStatus?.phase === 'coding' || hubStatus?.phase === 'waitingToResume') {
       text = 'II';
@@ -321,11 +383,6 @@ function log(event: string, detail?: string): void {
   if (settings.debug) console.debug('[CodeAlong]', line);
 }
 
-async function saveSettings(patch: Partial<Settings>): Promise<void> {
-  settings = { ...settings, ...patch };
-  await chrome.storage.local.set({ settings });
-}
-
 function safeHost(url: string | undefined): string {
   try {
     return url ? new URL(url).host : '';
@@ -342,7 +399,7 @@ chrome.runtime.onMessage.addListener(
     void (async () => {
       await ready;
       if (msg.type === 'agent:hello' || msg.type === 'agent:video') {
-        const isActiveTab = !!active && sender.tab?.id === active.tabId && settings.enabled;
+        const isActiveTab = !!active && sender.tab?.id === active.tabId;
         if (isActiveTab && msg.type === 'agent:video' && sender.frameId !== undefined) {
           onAgentReport(sender.frameId, msg);
           connection.ensure(); // a report also wakes the worker: make sure we are (re)connecting
@@ -367,18 +424,18 @@ async function handlePopup(msg: PopupRequest): Promise<unknown> {
     case 'popup:unfollow':
       await unfollow();
       return { ok: true };
-    case 'popup:setEnabled':
-      await saveSettings({ enabled: msg.enabled });
-      log(msg.enabled ? 'ENABLED' : 'DISABLED');
-      await broadcastToTab(
-        msg.enabled ? { type: 'agent:activate', debug: settings.debug } : { type: 'agent:deactivate' },
-      );
-      syncConnection();
-      return { ok: true };
-    case 'popup:setDebug':
-      await saveSettings({ debug: msg.debug });
-      await broadcastToTab({ type: 'agent:activate', debug: msg.debug });
-      return { ok: true };
+    case 'popup:setSettings':
+      return { ok: true, settings: await updateSettings(msg.patch) };
+    case 'popup:resetSettings':
+      // Keeps the on/off switch and troubleshooting choice; resets timing and behaviour.
+      return {
+        ok: true,
+        settings: await updateSettings({
+          ...DEFAULT_CHROME_SETTINGS.shared,
+          enabled: settings.shared.enabled,
+          showOverlay: DEFAULT_CHROME_SETTINGS.showOverlay,
+        }),
+      };
     case 'popup:probe': {
       if (connection.connected) return { vscode: true, incompatible: false } satisfies ProbeResult;
       const outcome = await probeHub(HUB_URLS);

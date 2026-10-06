@@ -8,4 +8,5 @@
 | pause the video yourself           | **never** starts it again by itself |
 | press play while coding            | lets it play until you stop coding  |
 
-The status bar shows what is happening, including a countdown before the video continues.
+The status bar and a small label on the video show what is happening, including a countdown before
+the video continues. All timings can be changed in the Chrome popup.
