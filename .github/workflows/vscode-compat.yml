@@ -45,7 +45,7 @@ jobs:
         run: node e2e/vscode/run.mjs
       - name: Upload VS Code logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vscode-compat-${{ matrix.os }}
           path: e2e/.artifacts/
